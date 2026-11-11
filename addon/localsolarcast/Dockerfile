@@ -12,5 +12,7 @@ RUN mkdir -p /tmp/build /app \
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 WORKDIR /app
+ENV DATA_DIR=/config \
+    SYSTEMS_FILE=/config/systems.yaml
 EXPOSE 8000
 CMD ["/run.sh"]
