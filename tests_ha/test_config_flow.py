@@ -5,8 +5,13 @@ from custom_components.localsolarcast.api import (
     LocalSolarCastError,
 )
 from custom_components.localsolarcast.const import (
+    CONF_AC_KW,
     CONF_AZ,
     CONF_DEC,
+    CONF_INVERTER,
+    CONF_INVERTER_COUNT,
+    CONF_INVERTER_ID,
+    CONF_INVERTERS,
     CONF_KWP,
     CONF_NAME,
     CONF_PLANES,
@@ -65,11 +70,16 @@ async def test_happy_path_with_four_planes(hass):
             CONF_SYSTEM_ID: "home",
             "lat": 44.8125,
             "lon": 20.4612,
-            "inverter_kw": 5.0,
+            CONF_INVERTER_COUNT: 1,
             "system_loss": 0.1,
             "damping_morning": 0.0,
             "damping_evening": 0.0,
         },
+    )
+    assert result["step_id"] == "inverters"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={"inverter_0_id": "main", "inverter_0_kw": 5.0},
     )
     assert result["step_id"] == "plane"
     for index in range(4):
@@ -79,6 +89,7 @@ async def test_happy_path_with_four_planes(hass):
                 CONF_DEC: 30,
                 CONF_AZ: 0,
                 CONF_KWP: 1.25,
+                CONF_INVERTER: "main",
                 "add_another": index < 3,
             },
         )
@@ -87,7 +98,10 @@ async def test_happy_path_with_four_planes(hass):
     assert result["type"] == "create_entry"
     assert len(result["options"][CONF_PLANES]) == 4
     assert result["data"][CONF_SYSTEM_ID] == "home"
-    assert FakeApi.put_calls[-1][1]["planes"][0]["dec"] == 30
+    payload = FakeApi.put_calls[-1][1]
+    assert payload["planes"][0]["dec"] == 30
+    assert payload["planes"][0][CONF_INVERTER] == "main"
+    assert payload[CONF_INVERTERS] == [{"id": "main", CONF_AC_KW: 5.0}]
 
 
 async def test_four_plane_limit_ignores_extra_add(hass):
@@ -102,7 +116,7 @@ async def test_four_plane_limit_ignores_extra_add(hass):
             CONF_SYSTEM_ID: "home",
             "lat": 44.8,
             "lon": 20.4,
-            "inverter_kw": None,
+            CONF_INVERTER_COUNT: 0,
             "system_loss": 0.1,
             "damping_morning": 0.0,
             "damping_evening": 0.0,
@@ -148,11 +162,21 @@ async def test_options_flow_re_puts(hass, monkeypatch):
             CONF_NAME: "Cabin",
             "lat": 45.0,
             "lon": 20.0,
-            "inverter_kw": 4.0,
+            CONF_INVERTER_COUNT: 2,
             "system_loss": 0.12,
             "damping_morning": 0.0,
             "damping_evening": 0.0,
             "planes_count": 2,
+        },
+    )
+    assert result["step_id"] == "inverters"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "inverter_0_id": "garage",
+            "inverter_0_kw": 2.0,
+            "inverter_1_id": "roof",
+            "inverter_1_kw": 2.0,
         },
     )
     assert result["step_id"] == "planes"
@@ -162,9 +186,11 @@ async def test_options_flow_re_puts(hass, monkeypatch):
             "dec_0": 30,
             "az_0": 0,
             "kwp_0": 2.0,
+            "inverter_0": "garage",
             "dec_1": 35,
             "az_1": 90,
             "kwp_1": 2.0,
+            "inverter_1": "roof",
         },
     )
     assert result["step_id"] == "telemetry"
@@ -177,3 +203,46 @@ async def test_options_flow_re_puts(hass, monkeypatch):
     assert payload["name"] == "Cabin"
     assert len(payload["planes"]) == 2
     assert payload["planes"][1]["az"] == 90
+    assert payload[CONF_INVERTERS] == [
+        {"id": "garage", CONF_AC_KW: 2.0},
+        {"id": "roof", CONF_AC_KW: 2.0},
+    ]
+    assert payload["planes"][0][CONF_INVERTER] == "garage"
+    assert payload["planes"][1][CONF_INVERTER] == "roof"
+
+
+async def test_legacy_entry_migrates_to_inverters(hass):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.localsolarcast import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Home",
+        version=1,
+        data={
+            CONF_URL: "http://backend:8000",
+            "token": None,
+            CONF_SYSTEM_ID: "home",
+        },
+        options={
+            CONF_NAME: "Home",
+            "lat": 44.8125,
+            "lon": 20.4612,
+            "inverter_kw": 5.0,
+            "system_loss": 0.1,
+            "damping_morning": 0.0,
+            "damping_evening": 0.0,
+            CONF_PLANES: [{"dec": 30, "az": 0, "kwp": 5.0}],
+        },
+        entry_id="legacy_entry",
+    )
+    entry.add_to_hass(hass)
+    assert await async_migrate_entry(hass, entry)
+    migrated = hass.config_entries.async_get_entry(entry.entry_id)
+    assert migrated.version == 2
+    assert migrated.options[CONF_INVERTERS] == [
+        {CONF_INVERTER_ID: "main", CONF_AC_KW: 5.0}
+    ]
+    assert migrated.options[CONF_PLANES][0][CONF_INVERTER] == "main"
+    assert "inverter_kw" not in migrated.options

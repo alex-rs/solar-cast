@@ -5,7 +5,11 @@ from zoneinfo import ZoneInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.localsolarcast.const import (
+    CONF_AC_KW,
     CONF_ENERGY_ENTITY,
+    CONF_INVERTER,
+    CONF_INVERTER_ID,
+    CONF_INVERTERS,
     CONF_LAT,
     CONF_LON,
     CONF_NAME,
@@ -68,6 +72,7 @@ def make_entry() -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
         title="Home",
+        version=2,
         data={
             CONF_URL: "http://backend:8000",
             CONF_TOKEN: None,
@@ -77,11 +82,20 @@ def make_entry() -> MockConfigEntry:
             CONF_NAME: "Home",
             CONF_LAT: 44.8125,
             CONF_LON: 20.4612,
-            "inverter_kw": 5.0,
+            CONF_INVERTERS: [
+                {CONF_INVERTER_ID: "main", CONF_AC_KW: 5.0},
+            ],
             "system_loss": 0.1,
             "damping_morning": 0.0,
             "damping_evening": 0.0,
-            CONF_PLANES: [{"dec": 30, "az": 0, "kwp": 5.0}],
+            CONF_PLANES: [
+                {
+                    "dec": 30,
+                    "az": 0,
+                    "kwp": 5.0,
+                    CONF_INVERTER: "main",
+                }
+            ],
             CONF_ENERGY_ENTITY: "sensor.pv_energy",
             "soc_threshold": 98,
             "export_limited": False,

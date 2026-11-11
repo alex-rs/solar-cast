@@ -16,10 +16,18 @@
           "system_id": "System ID",
           "lat": "Latitude",
           "lon": "Longitude",
-          "inverter_kw": "Inverter size (kW)",
+          "inverter_count": "Number of inverters",
           "system_loss": "System losses",
           "damping_morning": "Morning damping",
           "damping_evening": "Evening damping"
+        }
+      },
+      "inverters": {
+        "title": "Inverters",
+        "description": "Declare each AC unit and its rated AC power.",
+        "data": {
+          "inverter_0_id": "Inverter ID",
+          "inverter_0_kw": "Inverter AC rating (kW)"
         }
       },
       "plane": {
@@ -29,6 +37,7 @@
           "dec": "Tilt (degrees)",
           "az": "Azimuth (degrees)",
           "kwp": "Plane size (kWp)",
+          "inverter": "Inverter",
           "add_another": "Add another plane"
         }
       },
@@ -49,7 +58,9 @@
     "error": {
       "cannot_connect": "Cannot reach the backend",
       "invalid_auth": "Invalid API token",
-      "invalid_system_id": "System ID must be a slug"
+      "invalid_system_id": "System ID must be a slug",
+      "invalid_inverter_id": "Inverter ID must be lowercase letters, digits, _ or -",
+      "duplicate_inverter_id": "Inverter IDs must be unique"
     },
     "abort": {
       "already_configured": "This backend and system are already configured"
@@ -63,12 +74,16 @@
           "name": "Name",
           "lat": "Latitude",
           "lon": "Longitude",
-          "inverter_kw": "Inverter size (kW)",
+          "inverter_count": "Number of inverters",
           "system_loss": "System losses",
           "damping_morning": "Morning damping",
           "damping_evening": "Evening damping",
           "planes_count": "Number of planes"
         }
+      },
+      "inverters": {
+        "title": "Inverters",
+        "description": "Declare each AC unit and its rated AC power."
       },
       "planes": {
         "title": "Plane geometry",
@@ -89,7 +104,9 @@
     },
     "error": {
       "cannot_connect": "Cannot reach the backend",
-      "invalid_auth": "Invalid API token"
+      "invalid_auth": "Invalid API token",
+      "invalid_inverter_id": "Inverter ID must be lowercase letters, digits, _ or -",
+      "duplicate_inverter_id": "Inverter IDs must be unique"
     }
   },
   "services": {
@@ -104,6 +121,14 @@
     "retrain": {
       "name": "Retrain accuracy layers",
       "description": "Ask the backend to retrain calibration, shading and MOS."
+    },
+    "upload_horizon": {
+      "name": "Upload horizon",
+      "description": "Upload a user horizon CSV for a configured system."
+    },
+    "clear_horizon": {
+      "name": "Clear horizon",
+      "description": "Remove the user horizon and fall back to PVGIS terrain."
     }
   }
 }

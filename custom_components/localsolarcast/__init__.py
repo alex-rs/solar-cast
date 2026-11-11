@@ -15,15 +15,22 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import LocalSolarCastApi, LocalSolarCastError
 from .backfill import async_backfill, async_maybe_backfill
 from .const import (
+    CONF_AC_KW,
     CONF_ENERGY_ENTITY,
+    CONF_INVERTER,
+    CONF_INVERTER_ID,
+    CONF_INVERTER_KW,
+    CONF_INVERTERS,
     CONF_PLANES,
     CONF_SYSTEM_ID,
     CONF_TOKEN,
     CONF_URL,
     DOMAIN,
     SERVICE_BACKFILL,
+    SERVICE_CLEAR_HORIZON,
     SERVICE_GET_FORECAST,
     SERVICE_RETRAIN,
+    SERVICE_UPLOAD_HORIZON,
 )
 from .coordinator import LocalSolarCastCoordinator
 from .telemetry import TelemetryPusher
@@ -48,15 +55,42 @@ def _system_payload(entry: ConfigEntry) -> dict:
         "name": options.get("name", entry.title),
         "lat": float(options["lat"]),
         "lon": float(options["lon"]),
-        "inverter_kw": options.get("inverter_kw") or None,
         "system_loss": float(options.get("system_loss", 0.10)),
         "damping_morning": float(options.get("damping_morning", 0.0)),
         "damping_evening": float(options.get("damping_evening", 0.0)),
         "planes": [
-            {"dec": float(p["dec"]), "az": float(p["az"]), "kwp": float(p["kwp"])}
+            {
+                "dec": float(p["dec"]),
+                "az": float(p["az"]),
+                "kwp": float(p["kwp"]),
+                "inverter": p.get(CONF_INVERTER),
+            }
             for p in options.get(CONF_PLANES, [])
         ],
+        "inverters": [
+            {
+                "id": inverter[CONF_INVERTER_ID],
+                "ac_kw": float(inverter[CONF_AC_KW]),
+            }
+            for inverter in options.get(CONF_INVERTERS, [])
+        ],
     }
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if entry.version < 2:
+        options = dict(entry.options)
+        kw = options.pop(CONF_INVERTER_KW, None)
+        if kw and not options.get(CONF_INVERTERS):
+            options[CONF_INVERTERS] = [
+                {CONF_INVERTER_ID: "main", CONF_AC_KW: float(kw)}
+            ]
+            options[CONF_PLANES] = [
+                {**plane, CONF_INVERTER: "main"}
+                for plane in options.get(CONF_PLANES, [])
+            ]
+        hass.config_entries.async_update_entry(entry, options=options, version=2)
+    return True
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -101,7 +135,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await runtime.telemetry.async_stop()
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not hass.config_entries.async_entries(DOMAIN):
-        for service in (SERVICE_GET_FORECAST, SERVICE_BACKFILL, SERVICE_RETRAIN):
+        for service in (
+            SERVICE_GET_FORECAST,
+            SERVICE_BACKFILL,
+            SERVICE_RETRAIN,
+            SERVICE_UPLOAD_HORIZON,
+            SERVICE_CLEAR_HORIZON,
+        ):
             if hass.services.has_service(DOMAIN, service):
                 hass.services.async_remove(DOMAIN, service)
     return unloaded
@@ -151,6 +191,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise ValueError("unknown config entry")
         await runtime.api.retrain(runtime.coordinator.system_id)
 
+    async def handle_upload_horizon(call: ServiceCall) -> None:
+        runtime = _get_runtime(hass, call.data[CONFIG_ENTRY_ID])
+        if runtime is None:
+            raise ValueError("unknown config entry")
+        await runtime.api.put_horizon(
+            runtime.coordinator.system_id, call.data["horizon"]
+        )
+
+    async def handle_clear_horizon(call: ServiceCall) -> None:
+        runtime = _get_runtime(hass, call.data[CONFIG_ENTRY_ID])
+        if runtime is None:
+            raise ValueError("unknown config entry")
+        await runtime.api.delete_horizon(runtime.coordinator.system_id)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_FORECAST,
@@ -184,5 +238,22 @@ def _async_register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_RETRAIN,
         handle_retrain,
+        schema=vol.Schema({vol.Required(CONFIG_ENTRY_ID): cv.string}),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPLOAD_HORIZON,
+        handle_upload_horizon,
+        schema=vol.Schema(
+            {
+                vol.Required(CONFIG_ENTRY_ID): cv.string,
+                vol.Required("horizon"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CLEAR_HORIZON,
+        handle_clear_horizon,
         schema=vol.Schema({vol.Required(CONFIG_ENTRY_ID): cv.string}),
     )

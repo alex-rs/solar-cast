@@ -36,12 +36,19 @@ class LocalSolarCastApi:
             return {"Authorization": f"Bearer {self._token}"}
         return {}
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         url = f"{self.base_url}{path}"
+        request_headers = {**self._headers, **(headers or {})}
         try:
             async with asyncio.timeout(35):
                 response = await self._session.request(
-                    method, url, headers=self._headers, timeout=TIMEOUT, **kwargs
+                    method, url, headers=request_headers, timeout=TIMEOUT, **kwargs
                 )
                 if response.status == 401:
                     raise LocalSolarCastAuthError("invalid token", 401)
@@ -85,3 +92,14 @@ class LocalSolarCastApi:
 
     async def retrain(self, system_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/api/v1/systems/{system_id}/retrain")
+
+    async def put_horizon(self, system_id: str, csv_text: str) -> None:
+        await self._request(
+            "PUT",
+            f"/api/v1/systems/{system_id}/horizon",
+            data=csv_text,
+            headers={"Content-Type": "text/csv"},
+        )
+
+    async def delete_horizon(self, system_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/systems/{system_id}/horizon")

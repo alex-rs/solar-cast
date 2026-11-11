@@ -23,8 +23,13 @@ from .const import (
     CONF_DEC,
     CONF_ENERGY_ENTITY,
     CONF_EXPORT_LIMITED,
+    CONF_AC_KW,
+    CONF_INVERTER,
+    CONF_INVERTER_COUNT,
+    CONF_INVERTER_ID,
     CONF_INVERTER_KW,
     CONF_INVERTER_TEMP_ENTITY,
+    CONF_INVERTERS,
     CONF_KWP,
     CONF_LAT,
     CONF_LON,
@@ -56,9 +61,14 @@ def _system_schema(defaults: dict[str, Any], *, with_planes_count: bool = False)
         vol.Required(CONF_LON, default=defaults.get(CONF_LON, 0.0)): vol.All(
             vol.Coerce(float), vol.Range(min=-180, max=180)
         ),
-        vol.Optional(CONF_INVERTER_KW, default=defaults.get(CONF_INVERTER_KW)): vol.Any(
-            None, "", vol.All(vol.Coerce(float), vol.Range(min=0.01))
-        ),
+        vol.Required(
+            CONF_INVERTER_COUNT,
+            default=(
+                len(defaults[CONF_INVERTERS])
+                if CONF_INVERTERS in defaults
+                else (1 if defaults.get(CONF_INVERTER_KW) else 0)
+            ),
+        ): vol.All(vol.Coerce(int), vol.Range(min=0, max=8)),
         vol.Optional(
             CONF_SYSTEM_LOSS, default=defaults.get(CONF_SYSTEM_LOSS, DEFAULT_SYSTEM_LOSS)
         ): vol.All(vol.Coerce(float), vol.Range(min=0, max=0.99)),
@@ -76,7 +86,31 @@ def _system_schema(defaults: dict[str, Any], *, with_planes_count: bool = False)
     return vol.Schema(fields)
 
 
-def _plane_schema(defaults: dict[str, Any] | None = None, *, show_add: bool = True) -> vol.Schema:
+def _inverter_schema(inverters: list[dict[str, Any]]) -> vol.Schema:
+    fields: dict[Any, Any] = {}
+    for index in range(len(inverters)):
+        existing = inverters[index]
+        fields[
+            vol.Required(
+                f"inverter_{index}_id",
+                default=existing.get(CONF_INVERTER_ID, "main" if index == 0 else f"inv{index + 1}"),
+            )
+        ] = str
+        fields[
+            vol.Required(
+                f"inverter_{index}_kw",
+                default=existing.get(CONF_AC_KW, 5.0),
+            )
+        ] = vol.All(vol.Coerce(float), vol.Range(min=0.01, max=1000))
+    return vol.Schema(fields)
+
+
+def _plane_schema(
+    defaults: dict[str, Any] | None = None,
+    *,
+    show_add: bool = True,
+    inverters: list[dict[str, Any]] | None = None,
+) -> vol.Schema:
     defaults = defaults or {}
     fields: dict[Any, Any] = {
         vol.Required(CONF_DEC, default=defaults.get(CONF_DEC, 30)): vol.All(
@@ -89,6 +123,12 @@ def _plane_schema(defaults: dict[str, Any] | None = None, *, show_add: bool = Tr
             vol.Coerce(float), vol.Range(min=0.001)
         ),
     }
+    if inverters:
+        ids = [inverter[CONF_INVERTER_ID] for inverter in inverters]
+        default = defaults.get(CONF_INVERTER)
+        if default not in ids:
+            default = ids[0]
+        fields[vol.Required(CONF_INVERTER, default=default)] = vol.In(ids)
     if show_add:
         fields[vol.Optional(CONF_ADD_ANOTHER, default=False)] = bool
     return vol.Schema(fields)
@@ -119,25 +159,38 @@ def _system_payload(options: dict[str, Any], data: dict[str, Any]) -> dict[str, 
         "name": options.get(CONF_NAME, data.get(CONF_NAME, "Home")),
         "lat": float(options[CONF_LAT]),
         "lon": float(options[CONF_LON]),
-        "inverter_kw": options.get(CONF_INVERTER_KW) or None,
         "system_loss": float(options.get(CONF_SYSTEM_LOSS, DEFAULT_SYSTEM_LOSS)),
         "damping_morning": float(options.get(CONF_DAMPING_MORNING, 0.0)),
         "damping_evening": float(options.get(CONF_DAMPING_EVENING, 0.0)),
         "planes": [
-            {"dec": float(p[CONF_DEC]), "az": float(p[CONF_AZ]), "kwp": float(p[CONF_KWP])}
+            {
+                "dec": float(p[CONF_DEC]),
+                "az": float(p[CONF_AZ]),
+                "kwp": float(p[CONF_KWP]),
+                "inverter": p.get(CONF_INVERTER),
+            }
             for p in options.get(CONF_PLANES, [])
+        ],
+        "inverters": [
+            {
+                "id": inverter[CONF_INVERTER_ID],
+                "ac_kw": float(inverter[CONF_AC_KW]),
+            }
+            for inverter in options.get(CONF_INVERTERS, [])
         ],
     }
 
 
 class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         self._url = DEFAULT_URL
         self._token: str | None = None
         self._system: dict[str, Any] = {}
         self._planes: list[dict[str, Any]] = []
+        self._inverters: list[dict[str, Any]] = []
+        self._count = 0
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
@@ -179,6 +232,10 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_SYSTEM_ID: system_id,
                 }
                 self._planes = []
+                self._inverters = []
+                self._count = int(user_input[CONF_INVERTER_COUNT])
+                if self._count > 0:
+                    return await self.async_step_inverters()
                 return await self.async_step_plane()
         defaults = {
             CONF_NAME: "Home",
@@ -191,6 +248,46 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         return self.async_show_form(step_id="system", data_schema=schema, errors=errors)
 
+    async def async_step_inverters(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        seed = self._inverters or [
+            {
+                CONF_INVERTER_ID: "main" if index == 0 else f"inv{index + 1}",
+                CONF_AC_KW: 5.0,
+            }
+            for index in range(self._count)
+        ]
+        if user_input is not None:
+            ids = [
+                str(user_input[f"inverter_{index}_id"]).strip()
+                for index in range(self._count)
+            ]
+            if any(not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", value) for value in ids):
+                errors["base"] = "invalid_inverter_id"
+            elif len(ids) != len(set(ids)):
+                errors["base"] = "duplicate_inverter_id"
+            else:
+                self._inverters = [
+                    {
+                        CONF_INVERTER_ID: ids[index],
+                        CONF_AC_KW: float(user_input[f"inverter_{index}_kw"]),
+                    }
+                    for index in range(self._count)
+                ]
+                return await self.async_step_plane()
+            seed = [
+                {
+                    CONF_INVERTER_ID: ids[index],
+                    CONF_AC_KW: user_input[f"inverter_{index}_kw"],
+                }
+                for index in range(self._count)
+            ]
+        return self.async_show_form(
+            step_id="inverters",
+            data_schema=_inverter_schema(seed),
+            errors=errors,
+        )
+
     async def async_step_plane(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             self._planes.append(
@@ -198,6 +295,9 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_DEC: float(user_input[CONF_DEC]),
                     CONF_AZ: float(user_input[CONF_AZ]),
                     CONF_KWP: float(user_input[CONF_KWP]),
+                    CONF_INVERTER: (
+                        user_input.get(CONF_INVERTER) if self._inverters else None
+                    ),
                 }
             )
             if user_input.get(CONF_ADD_ANOTHER) and len(self._planes) < 4:
@@ -205,7 +305,7 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_telemetry()
         return self.async_show_form(
             step_id="plane",
-            data_schema=_plane_schema(),
+            data_schema=_plane_schema(inverters=self._inverters),
             description_placeholders={"count": str(len(self._planes) + 1)},
         )
 
@@ -215,6 +315,7 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options = {
                 **self._system,
                 CONF_PLANES: self._planes,
+                CONF_INVERTERS: self._inverters,
                 **user_input,
             }
             options.pop(CONF_SYSTEM_ID, None)
@@ -257,31 +358,128 @@ class LocalSolarCastOptionsFlow(OptionsFlow):
         self._entry = config_entry
         self._options: dict[str, Any] = dict(config_entry.options)
         self._planes: list[dict[str, Any]] = []
+        self._count = 0
+        self._inverters: list[dict[str, Any]] = []
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             self._options.update(user_input)
-            self._count = int(user_input[CONF_PLANES_COUNT])
+            self._count = int(user_input[CONF_INVERTER_COUNT])
             existing = self._entry.options.get(CONF_PLANES, [])
             self._planes = []
-            for index in range(self._count):
-                base = existing[index] if index < len(existing) else {"dec": 30, "az": 0, "kwp": 1.0}
-                self._planes.append({"dec": base.get("dec", 30), "az": base.get("az", 0), "kwp": base.get("kwp", 1.0)})
+            for index in range(int(user_input[CONF_PLANES_COUNT])):
+                base = (
+                    existing[index]
+                    if index < len(existing)
+                    else {"dec": 30, "az": 0, "kwp": 1.0}
+                )
+                self._planes.append(
+                    {
+                        "dec": base.get("dec", 30),
+                        "az": base.get("az", 0),
+                        "kwp": base.get("kwp", 1.0),
+                        CONF_INVERTER: base.get(CONF_INVERTER),
+                    }
+                )
+            existing_inverters = list(self._options.get(CONF_INVERTERS, []))
+            if (
+                not existing_inverters
+                and self._options.get(CONF_INVERTER_KW)
+                and self._count > 0
+            ):
+                existing_inverters = [
+                    {
+                        CONF_INVERTER_ID: "main",
+                        CONF_AC_KW: float(self._options[CONF_INVERTER_KW]),
+                    }
+                ]
+                self._options[CONF_INVERTERS] = existing_inverters
+                self._planes = [
+                    {**plane, CONF_INVERTER: "main"} for plane in self._planes
+                ]
+            self._inverters = [
+                (
+                    existing_inverters[index]
+                    if index < len(existing_inverters)
+                    else {
+                        CONF_INVERTER_ID: "main" if index == 0 else f"inv{index + 1}",
+                        CONF_AC_KW: 5.0,
+                    }
+                )
+                for index in range(self._count)
+            ]
+            if self._count > 0:
+                return await self.async_step_inverters()
             return await self.async_step_planes()
         defaults = dict(self._entry.options)
+        if not defaults.get(CONF_INVERTERS) and defaults.get(CONF_INVERTER_KW):
+            defaults[CONF_INVERTERS] = [
+                {
+                    CONF_INVERTER_ID: "main",
+                    CONF_AC_KW: float(defaults[CONF_INVERTER_KW]),
+                }
+            ]
+            defaults[CONF_PLANES] = [
+                {**plane, CONF_INVERTER: "main"}
+                for plane in defaults.get(CONF_PLANES, [])
+            ]
         defaults[CONF_PLANES_COUNT] = len(defaults.get(CONF_PLANES, [])) or 1
         return self.async_show_form(
             step_id="init",
             data_schema=_system_schema(defaults, with_planes_count=True),
         )
 
-    async def async_step_planes(self, user_input: dict[str, Any] | None = None):
+    async def async_step_inverters(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        seed = self._inverters or [
+            {
+                CONF_INVERTER_ID: "main" if index == 0 else f"inv{index + 1}",
+                CONF_AC_KW: 5.0,
+            }
+            for index in range(self._count)
+        ]
         if user_input is not None:
-            for index in range(self._count):
+            ids = [
+                str(user_input[f"inverter_{index}_id"]).strip()
+                for index in range(self._count)
+            ]
+            if any(not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", value) for value in ids):
+                errors["base"] = "invalid_inverter_id"
+            elif len(ids) != len(set(ids)):
+                errors["base"] = "duplicate_inverter_id"
+            else:
+                self._inverters = [
+                    {
+                        CONF_INVERTER_ID: ids[index],
+                        CONF_AC_KW: float(user_input[f"inverter_{index}_kw"]),
+                    }
+                    for index in range(self._count)
+                ]
+                return await self.async_step_planes()
+            seed = [
+                {
+                    CONF_INVERTER_ID: ids[index],
+                    CONF_AC_KW: user_input[f"inverter_{index}_kw"],
+                }
+                for index in range(self._count)
+            ]
+        return self.async_show_form(
+            step_id="inverters",
+            data_schema=_inverter_schema(seed),
+            errors=errors,
+        )
+
+    async def async_step_planes(self, user_input: dict[str, Any] | None = None):
+        ids = [inverter[CONF_INVERTER_ID] for inverter in self._inverters]
+        if user_input is not None:
+            for index in range(len(self._planes)):
                 self._planes[index] = {
                     CONF_DEC: float(user_input[f"dec_{index}"]),
                     CONF_AZ: float(user_input[f"az_{index}"]),
                     CONF_KWP: float(user_input[f"kwp_{index}"]),
+                    CONF_INVERTER: (
+                        user_input[f"inverter_{index}"] if ids else None
+                    ),
                 }
             return await self.async_step_telemetry()
         fields: dict[Any, Any] = {}
@@ -295,12 +493,23 @@ class LocalSolarCastOptionsFlow(OptionsFlow):
             fields[
                 vol.Required(f"kwp_{index}", default=plane[CONF_KWP])
             ] = vol.All(vol.Coerce(float), vol.Range(min=0.001))
+            if ids:
+                default = plane.get(CONF_INVERTER)
+                if default not in ids:
+                    default = ids[0]
+                fields[vol.Required(f"inverter_{index}", default=default)] = vol.In(ids)
         return self.async_show_form(step_id="planes", data_schema=vol.Schema(fields))
 
     async def async_step_telemetry(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
         if user_input is not None:
-            options = {**self._options, CONF_PLANES: self._planes, **user_input}
+            options = {
+                **self._options,
+                CONF_PLANES: self._planes,
+                CONF_INVERTERS: self._inverters,
+                **user_input,
+            }
+            options.pop(CONF_INVERTER_KW, None)
             api = LocalSolarCastApi(
                 async_get_clientsession(self.hass),
                 self._entry.data[CONF_URL],

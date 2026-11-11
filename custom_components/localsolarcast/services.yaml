@@ -45,3 +45,22 @@ retrain:
       selector:
         config_entry:
           integration: localsolarcast
+upload_horizon:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: localsolarcast
+    horizon:
+      required: true
+      selector:
+        text:
+          multiline: true
+clear_horizon:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: localsolarcast
