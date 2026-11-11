@@ -33,6 +33,13 @@ integration and point it at the backend URL. The integration registers the
 system, polls the forecast and (optionally) pushes your PV energy meter back as
 telemetry for calibration and shading learning.
 
+### Home Assistant OS add-on
+
+Add `https://github.com/alex-rs/solar-cast` as an add-on repository, install
+**LocalSolarCast**, then point the integration at
+`http://264cce28-localsolarcast:8000`. The add-on stores its database and
+`systems.yaml` in its app configuration directory (`/config` in the container).
+
 ## Development
 
 ```sh

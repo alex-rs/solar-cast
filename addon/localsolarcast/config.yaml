@@ -1,0 +1,40 @@
+name: LocalSolarCast
+version: "1.2.0"
+slug: localsolarcast
+description: Self-hosted PV production forecasting engine
+url: https://github.com/alex-rs/solar-cast
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ports:
+  8000/tcp: 8000
+ports_description:
+  8000/tcp: Forecast API
+map:
+  - type: app_config
+    read_only: false
+environment:
+  DATA_DIR: /config
+  SYSTEMS_FILE: /config/systems.yaml
+options:
+  api_token: ""
+  timezone: Europe/Belgrade
+  enable_fs_shadow_benchmark: true
+  log_level: INFO
+  openmeteo_base_url: https://api.open-meteo.com
+  openmeteo_api_key: ""
+  openmeteo_models: icon_seamless,ecmwf_ifs025,gfs_seamless
+  openmeteo_weights: 0.50,0.35,0.15
+schema:
+  api_token: password
+  timezone: str
+  enable_fs_shadow_benchmark: bool
+  log_level: list(DEBUG|INFO|WARNING|ERROR)
+  openmeteo_base_url: str
+  openmeteo_api_key: password
+  openmeteo_models: str
+  openmeteo_weights: str
+watchdog: tcp://[HOST]:[PORT:8000]
