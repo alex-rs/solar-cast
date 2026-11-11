@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.localsolarcast import _async_register_services
-from custom_components.localsolarcast.const import (
+from custom_components.solarcast import _async_register_services
+from custom_components.solarcast.const import (
     DOMAIN,
     SERVICE_CLEAR_HORIZON,
     SERVICE_UPLOAD_HORIZON,

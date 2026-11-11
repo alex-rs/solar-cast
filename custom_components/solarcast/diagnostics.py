@@ -6,7 +6,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .api import LocalSolarCastError
+from .api import SolarCastError
 from .const import CONF_TOKEN
 
 TO_REDACT = {CONF_TOKEN}
@@ -21,7 +21,7 @@ async def async_get_config_entry_diagnostics(
     if runtime is not None:
         try:
             health = await runtime.api.health()
-        except LocalSolarCastError as exc:
+        except SolarCastError as exc:
             error = str(exc)
     data = runtime.coordinator.data if runtime is not None else None
     return {

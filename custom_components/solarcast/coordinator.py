@@ -1,4 +1,4 @@
-"""DataUpdateCoordinator for LocalSolarCast."""
+"""DataUpdateCoordinator for SolarCast."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import LocalSolarCastApi, LocalSolarCastError
+from .api import SolarCastApi, SolarCastError
 from .const import ACCURACY_INTERVAL_SECONDS, DOMAIN, UPDATE_INTERVAL_MINUTES
 
 LOG = logging.getLogger(__name__)
@@ -66,9 +66,9 @@ def _periods(payload: dict) -> list[ForecastPeriod]:
     ]
 
 
-class LocalSolarCastCoordinator(DataUpdateCoordinator[ForecastData]):
+class SolarCastCoordinator(DataUpdateCoordinator[ForecastData]):
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, api: LocalSolarCastApi, system_id: str
+        self, hass: HomeAssistant, entry: ConfigEntry, api: SolarCastApi, system_id: str
     ) -> None:
         super().__init__(
             hass,
@@ -85,14 +85,14 @@ class LocalSolarCastCoordinator(DataUpdateCoordinator[ForecastData]):
     async def _async_update_data(self) -> ForecastData:
         try:
             hourly, intraday = await self._fetch_both()
-        except LocalSolarCastError as exc:
+        except SolarCastError as exc:
             raise UpdateFailed(str(exc)) from exc
         now = time.monotonic()
         if now - self._accuracy_fetched > ACCURACY_INTERVAL_SECONDS:
             try:
                 self._accuracy = await self.api.benchmark(self.system_id, 14)
                 self._accuracy_fetched = now
-            except LocalSolarCastError as exc:
+            except SolarCastError as exc:
                 LOG.debug("benchmark unavailable: %s", exc)
         accuracy = self._accuracy or {}
         nmae = None

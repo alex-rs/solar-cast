@@ -2,8 +2,8 @@ import datetime as dt
 
 import pytest
 
-from custom_components.localsolarcast.coordinator import ForecastData, ForecastPeriod
-from custom_components.localsolarcast.sensor import (
+from custom_components.solarcast.coordinator import ForecastData, ForecastPeriod
+from custom_components.solarcast.sensor import (
     SENSORS,
     _mean_power_window,
     _peak,

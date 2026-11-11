@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 
-from .api import LocalSolarCastApi, LocalSolarCastError
+from .api import SolarCastApi, SolarCastError
 from .const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_CURTAILMENT_ENTITY,
@@ -35,7 +35,7 @@ class TelemetryPusher:
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        api: LocalSolarCastApi,
+        api: SolarCastApi,
         coordinator,
     ) -> None:
         self.hass = hass
@@ -200,7 +200,7 @@ class TelemetryPusher:
                 await self.api.telemetry(
                     self.entry.data["system_id"], batch, origin="push"
                 )
-            except LocalSolarCastError as exc:
+            except SolarCastError as exc:
                 LOG.warning("telemetry push failed, will retry: %s", exc)
                 await self._async_save()
                 return

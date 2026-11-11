@@ -1,6 +1,6 @@
-name: LocalSolarCast
-version: "1.2.0"
-slug: localsolarcast
+name: SolarCast
+version: "1.3.0"
+slug: solarcast
 description: Self-hosted PV production forecasting engine
 url: https://github.com/alex-rs/solar-cast
 arch:

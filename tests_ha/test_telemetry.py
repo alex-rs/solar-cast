@@ -3,16 +3,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.localsolarcast.api import LocalSolarCastError
-from custom_components.localsolarcast.const import (
+from custom_components.solarcast.api import SolarCastError
+from custom_components.solarcast.const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_CURTAILMENT_ENTITY,
     CONF_ENERGY_ENTITY,
     CONF_EXPORT_LIMITED,
     CONF_SOC_THRESHOLD,
 )
-import custom_components.localsolarcast.telemetry as telemetry_module
-from custom_components.localsolarcast.telemetry import TelemetryPusher
+import custom_components.solarcast.telemetry as telemetry_module
+from custom_components.solarcast.telemetry import TelemetryPusher
 from tests_ha.fixtures import runtime_with
 
 
@@ -23,7 +23,7 @@ class FakeApi:
 
     async def telemetry(self, system_id, items, origin="push"):
         if self.fail:
-            raise LocalSolarCastError("down")
+            raise SolarCastError("down")
         self.calls.append((system_id, list(items), origin))
         return {"accepted": len(items), "rejected": []}
 

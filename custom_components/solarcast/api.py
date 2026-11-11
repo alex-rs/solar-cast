@@ -1,4 +1,4 @@
-"""Async client for the LocalSolarCast backend."""
+"""Async client for the SolarCast backend."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import aiohttp
 TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
-class LocalSolarCastError(Exception):
+class SolarCastError(Exception):
     """Backend communication error."""
 
     def __init__(self, message: str, status: int | None = None) -> None:
@@ -18,11 +18,11 @@ class LocalSolarCastError(Exception):
         self.status = status
 
 
-class LocalSolarCastAuthError(LocalSolarCastError):
+class SolarCastAuthError(SolarCastError):
     """Authentication rejected."""
 
 
-class LocalSolarCastApi:
+class SolarCastApi:
     def __init__(
         self, session: aiohttp.ClientSession, base_url: str, token: str | None = None
     ) -> None:
@@ -51,17 +51,17 @@ class LocalSolarCastApi:
                     method, url, headers=request_headers, timeout=TIMEOUT, **kwargs
                 )
                 if response.status == 401:
-                    raise LocalSolarCastAuthError("invalid token", 401)
+                    raise SolarCastAuthError("invalid token", 401)
                 if response.status >= 400:
                     body = await response.text()
-                    raise LocalSolarCastError(
+                    raise SolarCastError(
                         f"backend returned {response.status}: {body[:200]}", response.status
                     )
                 if response.status == 204:
                     return None
                 return await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError) as exc:
-            raise LocalSolarCastError(str(exc)) from exc
+            raise SolarCastError(str(exc)) from exc
 
     async def health(self) -> dict[str, Any]:
         return await self._request("GET", "/api/v1/health")

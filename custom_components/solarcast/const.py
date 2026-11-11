@@ -1,4 +1,4 @@
-DOMAIN = "localsolarcast"
+DOMAIN = "solarcast"
 
 PLATFORMS = ["sensor"]
 
@@ -32,7 +32,7 @@ CONF_SOC_THRESHOLD = "soc_threshold"
 CONF_EXPORT_LIMITED = "export_limited"
 CONF_INVERTER_TEMP_ENTITY = "inverter_temp_entity"
 
-DEFAULT_URL = "http://264cce28-localsolarcast:8000"
+DEFAULT_URL = "http://264cce28-solarcast:8000"
 DEFAULT_SOC_THRESHOLD = 98
 DEFAULT_SYSTEM_LOSS = 0.10
 UPDATE_INTERVAL_MINUTES = 15

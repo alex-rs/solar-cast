@@ -625,7 +625,7 @@ class ForecastPipeline:
             "latitude": system.lat,
             "longitude": system.lon,
             "distance": 0,
-            "place": "LocalSolarCast",
+            "place": "SolarCast",
             "timezone": timezone,
             "time": now.astimezone(tz).isoformat(),
             "time_utc": now.isoformat(),

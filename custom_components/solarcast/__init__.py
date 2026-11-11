@@ -1,4 +1,4 @@
-"""LocalSolarCast Home Assistant integration."""
+"""SolarCast Home Assistant integration."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import LocalSolarCastApi, LocalSolarCastError
+from .api import SolarCastApi, SolarCastError
 from .backfill import async_backfill, async_maybe_backfill
 from .const import (
     CONF_AC_KW,
@@ -32,7 +32,7 @@ from .const import (
     SERVICE_RETRAIN,
     SERVICE_UPLOAD_HORIZON,
 )
-from .coordinator import LocalSolarCastCoordinator
+from .coordinator import SolarCastCoordinator
 from .telemetry import TelemetryPusher
 
 LOG = logging.getLogger(__name__)
@@ -44,8 +44,8 @@ CONFIG_ENTRY_ID = "config_entry_id"
 
 @dataclass
 class RuntimeData:
-    api: LocalSolarCastApi
-    coordinator: LocalSolarCastCoordinator
+    api: SolarCastApi
+    coordinator: SolarCastCoordinator
     telemetry: TelemetryPusher
 
 
@@ -98,7 +98,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    api = LocalSolarCastApi(
+    api = SolarCastApi(
         async_get_clientsession(hass),
         entry.data[CONF_URL],
         entry.data.get(CONF_TOKEN),
@@ -106,12 +106,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     system_id = entry.data[CONF_SYSTEM_ID]
     try:
         await api.put_system(system_id, _system_payload(entry))
-    except LocalSolarCastError as exc:
+    except SolarCastError as exc:
         from homeassistant.exceptions import ConfigEntryNotReady
 
         raise ConfigEntryNotReady(f"cannot register system: {exc}") from exc
 
-    coordinator = LocalSolarCastCoordinator(hass, entry, api, system_id)
+    coordinator = SolarCastCoordinator(hass, entry, api, system_id)
     await coordinator.async_config_entry_first_refresh()
     telemetry = TelemetryPusher(hass, entry, api, coordinator)
     entry.runtime_data = RuntimeData(api=api, coordinator=coordinator, telemetry=telemetry)

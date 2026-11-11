@@ -1,10 +1,10 @@
 import pytest
 
-from custom_components.localsolarcast.api import (
-    LocalSolarCastAuthError,
-    LocalSolarCastError,
+from custom_components.solarcast.api import (
+    SolarCastAuthError,
+    SolarCastError,
 )
-from custom_components.localsolarcast.const import (
+from custom_components.solarcast.const import (
     CONF_AC_KW,
     CONF_AZ,
     CONF_DEC,
@@ -32,9 +32,9 @@ class FakeApi:
 
     async def health(self):
         if "bad-host" in self.url:
-            raise LocalSolarCastError("cannot connect")
+            raise SolarCastError("cannot connect")
         if self.token == "bad":
-            raise LocalSolarCastAuthError("invalid")
+            raise SolarCastAuthError("invalid")
         return {"status": "ok"}
 
     async def put_system(self, system_id, payload):
@@ -45,7 +45,7 @@ class FakeApi:
 @pytest.fixture(autouse=True)
 def patch_api(monkeypatch):
     monkeypatch.setattr(
-        "custom_components.localsolarcast.config_flow.LocalSolarCastApi", FakeApi
+        "custom_components.solarcast.config_flow.SolarCastApi", FakeApi
     )
     FakeApi.put_calls = []
 
@@ -150,7 +150,7 @@ async def test_options_flow_re_puts(hass, monkeypatch):
     from tests_ha.fixtures import make_entry
 
     monkeypatch.setattr(
-        "custom_components.localsolarcast.config_flow.LocalSolarCastApi", FakeApi
+        "custom_components.solarcast.config_flow.SolarCastApi", FakeApi
     )
     entry = make_entry()
     entry.add_to_hass(hass)
@@ -214,7 +214,7 @@ async def test_options_flow_re_puts(hass, monkeypatch):
 async def test_legacy_entry_migrates_to_inverters(hass):
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-    from custom_components.localsolarcast import async_migrate_entry
+    from custom_components.solarcast import async_migrate_entry
 
     entry = MockConfigEntry(
         domain=DOMAIN,

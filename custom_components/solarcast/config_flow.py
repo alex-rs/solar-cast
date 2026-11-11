@@ -12,7 +12,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import slugify
 
-from .api import LocalSolarCastApi, LocalSolarCastAuthError, LocalSolarCastError
+from .api import SolarCastApi, SolarCastAuthError, SolarCastError
 from .const import (
     CONF_ADD_ANOTHER,
     CONF_AZ,
@@ -181,7 +181,7 @@ def _system_payload(options: dict[str, Any], data: dict[str, Any]) -> dict[str, 
     }
 
 
-class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class SolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 2
 
     def __init__(self) -> None:
@@ -197,12 +197,12 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             url = user_input[CONF_URL].strip().rstrip("/")
             token = (user_input.get(CONF_TOKEN) or "").strip() or None
-            api = LocalSolarCastApi(async_get_clientsession(self.hass), url, token)
+            api = SolarCastApi(async_get_clientsession(self.hass), url, token)
             try:
                 await api.health()
-            except LocalSolarCastAuthError:
+            except SolarCastAuthError:
                 errors["base"] = "invalid_auth"
-            except LocalSolarCastError:
+            except SolarCastError:
                 errors["base"] = "cannot_connect"
             else:
                 self._url = url
@@ -319,7 +319,7 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 **user_input,
             }
             options.pop(CONF_SYSTEM_ID, None)
-            api = LocalSolarCastApi(
+            api = SolarCastApi(
                 async_get_clientsession(self.hass), self._url, self._token
             )
             try:
@@ -327,9 +327,9 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._system[CONF_SYSTEM_ID],
                     _system_payload(options, self._system),
                 )
-            except LocalSolarCastAuthError:
+            except SolarCastAuthError:
                 errors["base"] = "invalid_auth"
-            except LocalSolarCastError:
+            except SolarCastError:
                 errors["base"] = "cannot_connect"
             else:
                 return self.async_create_entry(
@@ -350,10 +350,10 @@ class LocalSolarCastConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        return LocalSolarCastOptionsFlow(config_entry)
+        return SolarCastOptionsFlow(config_entry)
 
 
-class LocalSolarCastOptionsFlow(OptionsFlow):
+class SolarCastOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._entry = config_entry
         self._options: dict[str, Any] = dict(config_entry.options)
@@ -510,7 +510,7 @@ class LocalSolarCastOptionsFlow(OptionsFlow):
                 **user_input,
             }
             options.pop(CONF_INVERTER_KW, None)
-            api = LocalSolarCastApi(
+            api = SolarCastApi(
                 async_get_clientsession(self.hass),
                 self._entry.data[CONF_URL],
                 self._entry.data.get(CONF_TOKEN),
@@ -520,9 +520,9 @@ class LocalSolarCastOptionsFlow(OptionsFlow):
                     self._entry.data[CONF_SYSTEM_ID],
                     _system_payload(options, self._entry.data),
                 )
-            except LocalSolarCastAuthError:
+            except SolarCastAuthError:
                 errors["base"] = "invalid_auth"
-            except LocalSolarCastError:
+            except SolarCastError:
                 errors["base"] = "cannot_connect"
             else:
                 return self.async_create_entry(title=options[CONF_NAME], data=options)

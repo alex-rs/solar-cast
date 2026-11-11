@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.localsolarcast.const import (
+from custom_components.solarcast.const import (
     CONF_AC_KW,
     CONF_ENERGY_ENTITY,
     CONF_INVERTER,
@@ -19,7 +19,7 @@ from custom_components.localsolarcast.const import (
     CONF_URL,
     DOMAIN,
 )
-from custom_components.localsolarcast.coordinator import ForecastData, ForecastPeriod
+from custom_components.solarcast.coordinator import ForecastData, ForecastPeriod
 
 TZ = ZoneInfo("Europe/Belgrade")
 

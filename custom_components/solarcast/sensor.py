@@ -19,7 +19,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import ForecastData, ForecastPeriod, LocalSolarCastCoordinator
+from .coordinator import ForecastData, ForecastPeriod, SolarCastCoordinator
 
 LOG = logging.getLogger(__name__)
 
@@ -211,19 +211,19 @@ async def async_setup_entry(
 ) -> None:
     runtime = entry.runtime_data
     entities = [
-        LocalSolarCastSensor(entry, runtime.coordinator, key, spec)
+        SolarCastSensor(entry, runtime.coordinator, key, spec)
         for key, spec in SENSORS.items()
     ]
     async_add_entities(entities)
 
 
-class LocalSolarCastSensor(CoordinatorEntity[LocalSolarCastCoordinator], SensorEntity):
+class SolarCastSensor(CoordinatorEntity[SolarCastCoordinator], SensorEntity):
     _attr_has_entity_name = True
 
     def __init__(
         self,
         entry: ConfigEntry,
-        coordinator: LocalSolarCastCoordinator,
+        coordinator: SolarCastCoordinator,
         key: str,
         spec: dict,
     ) -> None:
@@ -244,7 +244,7 @@ class LocalSolarCastSensor(CoordinatorEntity[LocalSolarCastCoordinator], SensorE
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
-            manufacturer="LocalSolarCast",
+            manufacturer="SolarCast",
             model="PV forecast",
         )
 

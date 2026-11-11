@@ -4,7 +4,7 @@ get_forecast:
       required: true
       selector:
         config_entry:
-          integration: localsolarcast
+          integration: solarcast
     resolution:
       default: 60
       selector:
@@ -27,7 +27,7 @@ backfill:
       required: true
       selector:
         config_entry:
-          integration: localsolarcast
+          integration: solarcast
     days:
       default: 60
       selector:
@@ -44,14 +44,14 @@ retrain:
       required: true
       selector:
         config_entry:
-          integration: localsolarcast
+          integration: solarcast
 upload_horizon:
   fields:
     config_entry_id:
       required: true
       selector:
         config_entry:
-          integration: localsolarcast
+          integration: solarcast
     horizon:
       required: true
       selector:
@@ -63,4 +63,4 @@ clear_horizon:
       required: true
       selector:
         config_entry:
-          integration: localsolarcast
+          integration: solarcast

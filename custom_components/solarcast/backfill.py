@@ -8,7 +8,7 @@ import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .api import LocalSolarCastApi, LocalSolarCastError
+from .api import SolarCastApi, SolarCastError
 from .const import DOMAIN
 
 LOG = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def _deltas(rows: list[dict]) -> list[tuple[dt.datetime, float]]:
 
 
 async def async_backfill(
-    hass: HomeAssistant, api: LocalSolarCastApi, system_id: str, entity_id: str, days: int = 60
+    hass: HomeAssistant, api: SolarCastApi, system_id: str, entity_id: str, days: int = 60
 ) -> int:
     days = max(1, min(int(days), 60))
     now = dt.datetime.now(dt.timezone.utc)
@@ -97,14 +97,14 @@ async def async_backfill(
         try:
             result = await api.telemetry(system_id, batch, origin="backfill")
             accepted += int(result.get("accepted", 0))
-        except LocalSolarCastError as exc:
+        except SolarCastError as exc:
             LOG.warning("backfill batch failed: %s", exc)
             break
     return accepted
 
 
 async def async_maybe_backfill(
-    hass: HomeAssistant, api: LocalSolarCastApi, entry, entity_id: str, days: int = 60
+    hass: HomeAssistant, api: SolarCastApi, entry, entity_id: str, days: int = 60
 ) -> None:
     store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.backfill")
     done = await store.async_load()

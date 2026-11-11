@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from custom_components.localsolarcast.energy import async_get_solar_forecast
+from custom_components.solarcast.energy import async_get_solar_forecast
 from tests_ha.fixtures import make_data, make_entry, runtime_with
 
 

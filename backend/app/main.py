@@ -120,7 +120,7 @@ def create_app(
             scheduler.shutdown(wait=False)
         await database.close()
 
-    app = FastAPI(title="LocalSolarCast", version="1.2.0", lifespan=lifespan)
+    app = FastAPI(title="SolarCast", version="1.3.0", lifespan=lifespan)
     app.include_router(routes_systems.router)
     app.include_router(routes_forecast.router)
     app.include_router(routes_compat.router)

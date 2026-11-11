@@ -1,7 +1,7 @@
 services:
-  localsolarcast:
+  solarcast:
     build: .
-    container_name: localsolarcast
+    container_name: solarcast
     restart: unless-stopped
     ports:
       - "8000:8000"
