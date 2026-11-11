@@ -33,6 +33,17 @@ integration and point it at the backend URL. The integration registers the
 system, polls the forecast and (optionally) pushes your PV energy meter back as
 telemetry for calibration and shading learning.
 
+## Development
+
+```sh
+cd backend && uv sync && uv run pytest
+python3 -m venv ../tests_ha/.venv && ../tests_ha/.venv/bin/pip install -r ../tests_ha/requirements_test.txt
+../tests_ha/.venv/bin/pytest ../tests_ha -c ../tests_ha/pytest.ini
+```
+
+API reference: [`docs/API.md`](docs/API.md). Verified upstream formats:
+[`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+
 ## Limitations
 
 - Learned shading is one factor per system; for multi-plane systems it is applied

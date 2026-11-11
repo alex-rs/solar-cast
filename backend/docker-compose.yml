@@ -1,0 +1,15 @@
+services:
+  localsolarcast:
+    build: .
+    container_name: localsolarcast
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      # Optional static systems file (copy systems.example.yaml first):
+      # - ./config/systems.yaml:/app/config/systems.yaml:ro
+    environment:
+      - TZ=Europe/Belgrade
+      - API_TOKEN=change-me
+      - ENABLE_FS_SHADOW_BENCHMARK=true

@@ -6,6 +6,7 @@ import asyncio
 import datetime as dt
 import logging
 import os
+from concurrent.futures import ProcessPoolExecutor
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -22,6 +23,21 @@ from ..core.pipeline import ForecastPipeline, system_config
 from ..core.timeconv import UTC
 
 LOG = logging.getLogger(__name__)
+
+_PROCESS_POOL: ProcessPoolExecutor | None = None
+
+
+def _get_process_pool() -> ProcessPoolExecutor:
+    global _PROCESS_POOL
+    if _PROCESS_POOL is None:
+        _PROCESS_POOL = ProcessPoolExecutor(max_workers=1)
+    return _PROCESS_POOL
+
+
+def _train_mos_process(db_path: str, system_row: dict, system, horizon, models_dir) -> dict | None:
+    database = Database(db_path)
+    asyncio.run(database.initialize())
+    return mos.train(database, system_row, system, horizon, models_dir)
 
 
 def resolve_scheduler_tz(settings: Settings, systems: list[dict]) -> str:
@@ -81,8 +97,15 @@ async def retrain_system(db: Database, pipeline: ForecastPipeline, system_row: d
     )
     await db.replace_shading(system.system_id, shade_rows)
     LOG.info("retrain %s: %d shading buckets", system.system_id, len(shade_rows))
-    await asyncio.to_thread(
-        mos.train, db, system_row, system, horizon, pipeline.settings.models_dir
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        _get_process_pool(),
+        _train_mos_process,
+        db.path,
+        system_row,
+        system,
+        horizon,
+        pipeline.settings.models_dir,
     )
     pipeline.invalidate()
 
