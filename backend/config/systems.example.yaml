@@ -1,0 +1,14 @@
+# Optional static system definitions, upserted at startup.
+# Copy to systems.yaml and mount it into the container.
+systems:
+  - system_id: home
+    name: Home
+    lat: 44.8125
+    lon: 20.4612
+    inverter_kw: 5.0
+    system_loss: 0.10
+    gamma_pdc: -0.004
+    planes:
+      - dec: 30
+        az: 0
+        kwp: 5.0

@@ -1,0 +1,16 @@
+plan.md
+AGENTS.md
+CLAUDE.md
+.cursor/
+.claude/
+.omp/
+*.db
+*.db-wal
+*.db-shm
+data/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.joblib
+models/
