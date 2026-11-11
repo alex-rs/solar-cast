@@ -271,27 +271,34 @@ and is zero wherever the base physics output is zero.
 
 ### Three-hour nowcast
 
-The latest telemetry period within 30 minutes is converted to a measured
-clear-sky index:
+Telemetry periods that ended within the last 45 minutes are converted to
+clear-sky indices, at most four of them, and each bucket contributes its own
+bias:
 
 $$
-k_{meas} = \mathrm{clip}\left(P_{measured}/P_{clear},\, 0,\, 1.5\right)
+\Delta k_i = \mathrm{clip}\left(P_{meas,i}/P_{clear,i},\, 0,\, 1.5\right)
+- \mathrm{clip}\left(P_{fc,i}/P_{clear,i},\, 0,\, 1.5\right)
 $$
 
-For the next three hours, the forecast clear-sky index is corrected with an
-exponential decay:
+The applied bias is the median over those buckets, anchored at the newest
+usable bucket `t_0`:
 
 $$
-k(t) = k_{fc}(t) + \left[k_{meas} - k_{fc}(t_0)\right]
-e^{-(t-t_0)/90}
+\Delta k = \mathrm{median}(\Delta k_i)
+$$
+
+$$
+k(t) = k_{fc}(t) + \Delta k \, e^{-(t-t_0)/90}
 $$
 
 $$
 P_{final} = \mathrm{clip}\left(k(t) P_{clear}(t),\, 0,\, P_{aco}\right)
 $$
 
-`90` is the decay time constant in minutes. Night periods and periods without a
-clear-sky reference remain zero.
+`90` is the decay time constant in minutes. The median keeps one passing cloud
+from flattening the whole window; with a single usable bucket the expression
+reduces to the measured bias of that bucket. Night periods and periods without
+a clear-sky reference remain zero.
 
 ### Period energy and labels
 
@@ -312,6 +319,46 @@ Install through HACS as a custom repository, then add the **SolarCast**
 integration and point it at the backend URL. The integration registers the
 system, polls the forecast and (optionally) pushes your PV energy meter back as
 telemetry for calibration and shading learning.
+
+### Correcting recorded production
+
+Pushed telemetry outranks backfill, and a user correction outranks both: rows
+written with `origin=manual` survive later pusher and backfill ticks. Correct
+one period, or delete a useless range, from an automation or Developer Tools:
+
+```yaml
+service: solarcast.set_telemetry
+data:
+  config_entry_id: <entry_id>
+  period_start: "2026-11-10T10:00:00+01:00"
+  energy_wh: 1234.5
+  curtailed: false
+```
+
+```yaml
+service: solarcast.delete_telemetry
+data:
+  config_entry_id: <entry_id>
+  start: "2026-11-09T00:00:00+01:00"
+  end: "2026-11-10T00:00:00+01:00"
+```
+
+The same operations without Home Assistant:
+
+```sh
+curl -X POST http://localhost:8000/api/v1/systems/home/telemetry \
+  -H "Authorization: Bearer $API_TOKEN" -H 'content-type: application/json' \
+  -d '{"origin":"manual","items":[{"period_start":"2026-11-10T09:00:00Z","period_min":15,"energy_wh":1234.5}]}'
+
+curl -X DELETE "http://localhost:8000/api/v1/systems/home/telemetry?start=2026-11-09T00:00:00Z&end=2026-11-10T00:00:00Z" \
+  -H "Authorization: Bearer $API_TOKEN"
+```
+
+Calibration, shading and the MOS model pick the correction up at the next
+nightly retrain (01:30 local); the intraday nowcast only uses the last 45
+minutes of telemetry. A metric-replacement or export-limited day is usually
+better deleted than zeroed, because zeros still count as measurable samples in
+the quality gates.
 
 ### Home Assistant OS add-on
 
@@ -342,3 +389,5 @@ API reference: [`docs/API.md`](docs/API.md). Verified upstream formats:
 - Open-Meteo's free tier is non-commercial. Forecast.Solar polling uses the free
   tier (~2 days, one plane per call).
 - The compat endpoint mirrors Forecast.Solar's response shape, not an official API.
+  Requests that match a registered system use the corrected `final` layer and report
+  the match in `message.info.solarcast`; unmatched requests are physics-only.
