@@ -18,11 +18,18 @@ LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class InverterConfig:
+    inverter_id: str
+    ac_kw: float
+
+
+@dataclass(frozen=True)
 class PlaneConfig:
     dec: float
     az_fs: float
     kwp: float
     plane_id: str | None = None
+    inverter_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -31,7 +38,7 @@ class SystemConfig:
     lat: float
     lon: float
     elevation_m: float = 0.0
-    inverter_kw: float | None = None
+    inverters: tuple[InverterConfig, ...] = field(default_factory=tuple)
     system_loss: float = 0.10
     gamma_pdc: float = -0.004
     damping_morning: float = 0.0
@@ -59,6 +66,7 @@ class SimResult:
     azimuth: pd.Series
     elevation: pd.Series
     planes: dict[str, pd.DataFrame]
+    inverters: dict[str, pd.Series] = field(default_factory=dict)
 
 
 def _prepare_weather(weather: pd.DataFrame) -> pd.DataFrame:
@@ -212,6 +220,7 @@ def simulate_system(
             azimuth=empty,
             elevation=empty,
             planes={},
+            inverters={},
         )
 
     position = _solar_position(frame, system)
@@ -253,6 +262,14 @@ def simulate_system(
     f_b_numerator = np.zeros(len(frame), dtype="float64")
     planes: dict[str, pd.DataFrame] = {}
     all_poa = np.zeros(len(frame), dtype="float64")
+    inverter_map = {inv.inverter_id: inv for inv in system.inverters}
+    inverter_pdc = {
+        inverter_id: np.zeros(len(frame), dtype="float64")
+        for inverter_id in inverter_map
+    }
+    inverter_assigned = {inverter_id: False for inverter_id in inverter_map}
+    unassigned_pdc = np.zeros(len(frame), dtype="float64")
+    unassigned_kwp = 0.0
 
     for ordinal, plane in enumerate(system.planes, start=1):
         plane_id = plane.plane_id or f"plane{ordinal}"
@@ -309,6 +326,14 @@ def simulate_system(
         pdc_total += pdc
         all_poa += poa_global
         f_b_numerator += pdc * np.nan_to_num(beam_fraction)
+        if plane.inverter_id is not None:
+            if plane.inverter_id not in inverter_map:
+                raise ValueError(f"unknown inverter {plane.inverter_id}")
+            inverter_pdc[plane.inverter_id] += pdc
+            inverter_assigned[plane.inverter_id] = True
+        else:
+            unassigned_pdc += pdc
+            unassigned_kwp += plane.kwp
 
         planes[plane_id] = pd.DataFrame(
             {
@@ -323,17 +348,36 @@ def simulate_system(
             index=frame.index,
         )
 
-    kwp_total = system.kwp_total
     pdc_series = pd.Series(pdc_total, index=frame.index, name="pdc")
-    paco = (
-        float(system.inverter_kw) * 1000.0
-        if system.inverter_kw is not None
-        else float(kwp_total) * 1000.0
-    )
-    pac = pvlib.inverter.pvwatts(pdc_series, paco / 0.96, eta_inv_nom=0.96)
-    pac = pd.Series(pac, index=frame.index, dtype="float64").fillna(0.0)
-    pac = pac.clip(lower=0.0, upper=paco)
-    pac = pac.where(pd.Series(up, index=frame.index), 0.0)
+    groups: list[tuple[str, np.ndarray, float]] = []
+    for inverter in system.inverters:
+        if inverter_assigned[inverter.inverter_id]:
+            groups.append(
+                (
+                    inverter.inverter_id,
+                    inverter_pdc[inverter.inverter_id],
+                    float(inverter.ac_kw) * 1000.0,
+                )
+            )
+    if unassigned_kwp > 0:
+        groups.append(("_unassigned", unassigned_pdc, unassigned_kwp * 1000.0))
+
+    pac_total = np.zeros(len(frame), dtype="float64")
+    inverter_ac: dict[str, pd.Series] = {}
+    paco = 0.0
+    for inverter_id, group_pdc, paco_group in groups:
+        group_ac = pvlib.inverter.pvwatts(
+            pd.Series(group_pdc, index=frame.index),
+            paco_group / 0.96,
+            eta_inv_nom=0.96,
+        )
+        group_ac = pd.Series(group_ac, index=frame.index, dtype="float64").fillna(0.0)
+        group_ac = group_ac.clip(lower=0.0, upper=paco_group)
+        group_ac = group_ac.where(pd.Series(up, index=frame.index), 0.0)
+        inverter_ac[inverter_id] = group_ac.rename(inverter_id)
+        pac_total += group_ac.to_numpy()
+        paco += paco_group
+    pac = pd.Series(pac_total, index=frame.index, dtype="float64", name="pac")
 
     with np.errstate(invalid="ignore", divide="ignore"):
         f_b = np.where(pdc_total > 0, f_b_numerator / pdc_total, np.nan)
@@ -350,4 +394,5 @@ def simulate_system(
         azimuth=azimuth.rename("azimuth"),
         elevation=elevation_angle.rename("elevation"),
         planes=planes,
+        inverters=inverter_ac,
     )

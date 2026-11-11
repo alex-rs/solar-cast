@@ -1,4 +1,5 @@
 import datetime as dt
+import time
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -62,6 +63,54 @@ async def test_native_forecast_shape_and_periods(api):
     by_date = local.groupby(local.index.date).sum()
     for entry in payload["daily"]:
         assert entry["wh"] == pytest.approx(by_date[pd.Timestamp(entry["date"]).date()])
+
+
+@pytest.mark.asyncio
+async def test_multi_inverter_system_round_trip(api):
+    body = system_body(
+        planes=[
+            {"dec": 30, "az": -90, "kwp": 2.5, "inverter": "east"},
+            {"dec": 30, "az": 90, "kwp": 2.5, "inverter": "west"},
+        ],
+        inverters=[
+            {"id": "east", "ac_kw": 2.0},
+            {"id": "west", "ac_kw": 2.0},
+        ],
+    )
+    body.pop("inverter_kw")
+    response = await api.put("/api/v1/systems/home", json=body)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["inverters"] == [
+        {"id": "east", "ac_kw": 2.0},
+        {"id": "west", "ac_kw": 2.0},
+    ]
+    assert [plane["inverter"] for plane in payload["planes"]] == ["east", "west"]
+    forecast = await api.get("/api/v1/systems/home/forecast?days=1")
+    assert forecast.status_code == 200, forecast.text
+    assert forecast.json()["ac_limit_w"] == 4000.0
+
+    conflict = system_body(inverters=[{"id": "main", "ac_kw": 5.0}])
+    assert (await api.put("/api/v1/systems/home", json=conflict)).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_forecast_uses_stored_weights(api, weather_stub):
+    await api.put("/api/v1/systems/home", json=system_body())
+    db = api.app.state.db
+    await db.put_weights(
+        44.8125,
+        20.4612,
+        [
+            {"model": "icon_seamless", "weight": 0.6, "samples": 250},
+            {"model": "ecmwf_ifs025", "weight": 0.3, "samples": 250},
+            {"model": "gfs_seamless", "weight": 0.1, "samples": 250},
+        ],
+        int(time.time()),
+    )
+    response = await api.get("/api/v1/systems/home/forecast")
+    assert response.status_code == 200, response.text
+    assert weather_stub.last_weights == [0.6, 0.3, 0.1]
 
 
 @pytest.mark.asyncio

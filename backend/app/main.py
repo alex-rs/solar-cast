@@ -47,6 +47,31 @@ async def _load_static_systems(db: Database, pipeline: ForecastPipeline, path) -
             "damping_morning": entry.get("damping_morning", 0.0),
             "damping_evening": entry.get("damping_evening", 0.0),
         }
+        raw_inverters = entry.get("inverters")
+        if raw_inverters is not None:
+            if any(plane.get("inverter") is None for plane in entry.get("planes", [])):
+                LOG.error(
+                    "static system %s: every plane must reference an inverter",
+                    system_id,
+                )
+                continue
+            inverter_rows = [
+                {"inverter_id": inverter["id"], "ac_kw": inverter["ac_kw"]}
+                for inverter in raw_inverters
+            ]
+            planes = [
+                {
+                    "dec": plane["dec"],
+                    "az_fs": plane["az"],
+                    "kwp": plane["kwp"],
+                    "inverter_id": plane.get("inverter"),
+                }
+                for plane in entry.get("planes", [])
+            ]
+            if planes:
+                await db.upsert_system(system, planes, inverter_rows)
+                LOG.info("loaded static system %s", system_id)
+            continue
         planes = [
             {"dec": plane["dec"], "az_fs": plane["az"], "kwp": plane["kwp"]}
             for plane in entry.get("planes", [])
@@ -95,7 +120,7 @@ def create_app(
             scheduler.shutdown(wait=False)
         await database.close()
 
-    app = FastAPI(title="LocalSolarCast", version="1.1.0", lifespan=lifespan)
+    app = FastAPI(title="LocalSolarCast", version="1.2.0", lifespan=lifespan)
     app.include_router(routes_systems.router)
     app.include_router(routes_forecast.router)
     app.include_router(routes_compat.router)

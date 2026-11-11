@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class InverterIn(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$")
+    ac_kw: float = Field(gt=0)
 
 
 class PlaneIn(BaseModel):
     dec: float = Field(ge=0, le=90)
     az: float = Field(ge=-180, le=180)
     kwp: float = Field(gt=0)
+    inverter: str | None = None
 
 
 class SystemIn(BaseModel):
@@ -18,6 +25,7 @@ class SystemIn(BaseModel):
     elevation_m: float | None = None
     timezone: str | None = None
     inverter_kw: float | None = Field(default=None, gt=0)
+    inverters: list[InverterIn] = Field(default_factory=list, max_length=8)
     system_loss: float = Field(default=0.10, ge=0, lt=1)
     gamma_pdc: float = -0.004
     damping_morning: float = Field(default=0.0, ge=0, le=1)
@@ -28,6 +36,29 @@ class SystemIn(BaseModel):
     @classmethod
     def _unique_ordinals(cls, planes: list[PlaneIn]) -> list[PlaneIn]:
         return planes
+
+    @model_validator(mode="after")
+    def _validate_inverters(self) -> "SystemIn":
+        ids = [inverter.id for inverter in self.inverters]
+        if self.inverter_kw is not None and self.inverters:
+            raise ValueError("use either inverter_kw or inverters")
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate inverter id")
+        if self.inverters and any(plane.inverter is None for plane in self.planes):
+            raise ValueError("every plane must reference an inverter")
+        if self.inverters and any(plane.inverter not in ids for plane in self.planes):
+            raise ValueError("plane references unknown inverter")
+        if not self.inverters and any(plane.inverter is not None for plane in self.planes):
+            raise ValueError("plane references unknown inverter")
+        if self.inverter_kw is not None and any(
+            plane.inverter is not None for plane in self.planes
+        ):
+            raise ValueError("plane references unknown inverter")
+        return self
+
+
+class InverterOut(InverterIn):
+    pass
 
 
 class PlaneOut(PlaneIn):
@@ -43,6 +74,7 @@ class SystemOut(BaseModel):
     elevation_m: float | None
     timezone: str
     inverter_kw: float | None
+    inverters: list[InverterOut]
     system_loss: float
     gamma_pdc: float
     damping_morning: float
@@ -60,6 +92,17 @@ class PeriodOut(BaseModel):
 class DailyOut(BaseModel):
     date: dt.date
     wh: float
+
+
+class HorizonPoint(BaseModel):
+    azimuth_deg: float
+    elevation_deg: float
+
+
+class HorizonOut(BaseModel):
+    system_id: str
+    source: Literal["user"]
+    points: list[HorizonPoint]
 
 
 class ForecastOut(BaseModel):

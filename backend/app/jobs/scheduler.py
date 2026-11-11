@@ -16,6 +16,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from config.settings import Settings
 
 from ..core import benchmark as benchmark_module
+from ..core import weights as weights_module
 from ..core.accuracy import calibration, mos, shading
 from ..core.clearsky import simulate_clearsky
 from ..core.database import Database
@@ -63,7 +64,7 @@ async def retrain_system(db: Database, pipeline: ForecastPipeline, system_row: d
     tel = pd.DataFrame(telemetry)
     tel.index = pd.to_datetime(tel.pop("period_start"), unit="s", utc=True)
     weather, _ = await pipeline.ensure_weather(system.lat, system.lon)
-    horizon = await pipeline.ensure_horizon(system.lat, system.lon)
+    horizon = await pipeline.ensure_horizon_for_system(system_row)
     clear = simulate_clearsky(tel.index, system, horizon)
     previous = await db.get_calibration(system.system_id)
     previous_c = float(previous["factor_c"]) if previous else 1.0
@@ -116,6 +117,29 @@ async def nightly_retrain(db: Database, pipeline: ForecastPipeline) -> None:
             await retrain_system(db, pipeline, row)
         except Exception:
             LOG.exception("retrain failed for %s", row["system_id"])
+    locations: dict[tuple[float, float], list[dict]] = {}
+    for row in await db.list_systems():
+        key = (round(row["lat"], 3), round(row["lon"], 3))
+        locations.setdefault(key, []).append(row)
+    now = int(dt.datetime.now(UTC).timestamp())
+    for group in locations.values():
+        representative = sorted(group, key=lambda item: item["system_id"])[0]
+        try:
+            horizon = await pipeline.ensure_horizon_for_system(representative)
+            await weights_module.learn_for_location(
+                db,
+                representative,
+                horizon,
+                pipeline.settings.openmeteo_models,
+                pipeline.settings.openmeteo_weights,
+                now,
+            )
+        except Exception:
+            LOG.exception(
+                "weight learning failed for %s", representative["system_id"]
+            )
+    await pipeline.refresh_weather()
+    pipeline.invalidate()
 
 
 async def housekeeping(db: Database) -> None:

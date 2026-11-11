@@ -40,9 +40,18 @@ class StubWeather:
         self.frame = frame
         self.calls = 0
 
-    async def get(self, lat: float, lon: float, forecast_days: int = 7) -> OpenMeteoResult:
+    async def get(
+        self,
+        lat: float,
+        lon: float,
+        forecast_days: int = 7,
+        weights=None,
+    ) -> OpenMeteoResult:
         self.calls += 1
-        return OpenMeteoResult(self.frame, 100.0, ("stub",), {})
+        self.last_weights = weights
+        return OpenMeteoResult(
+            self.frame, 100.0, ("stub",), pd.DataFrame(), {}
+        )
 
     def invalidate(self) -> None:
         pass

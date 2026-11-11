@@ -6,8 +6,9 @@ routes are public when `COMPAT_PUBLIC=true`.
 
 ## Systems
 
-`PUT /api/v1/systems/{system_id}` creates or replaces a system (1-4 planes).
-Changes to geometry or kWp reset the learned calibration, shading and MOS layers.
+`PUT /api/v1/systems/{system_id}` creates or replaces a system (1-4 planes,
+up to 8 inverters). Changes to plane geometry, plane kWp, inverter topology or
+inverter AC rating reset the learned calibration, shading and MOS layers.
 
 ```json
 {
@@ -15,18 +16,41 @@ Changes to geometry or kWp reset the learned calibration, shading and MOS layers
   "lat": 44.8125,
   "lon": 20.4612,
   "timezone": "Europe/Belgrade",
-  "inverter_kw": 5.0,
   "system_loss": 0.10,
   "gamma_pdc": -0.004,
   "damping_morning": 0.0,
   "damping_evening": 0.0,
-  "planes": [{"dec": 30, "az": 0, "kwp": 5.0}]
+  "inverters": [
+    {"id": "east", "ac_kw": 2.0},
+    {"id": "west", "ac_kw": 2.0}
+  ],
+  "planes": [
+    {"dec": 30, "az": -90, "kwp": 2.5, "inverter": "east"},
+    {"dec": 30, "az": 90, "kwp": 2.5, "inverter": "west"}
+  ]
 }
 ```
 
+Use either `inverters` or the legacy single `inverter_kw`, never both. When
+`inverters` is present, every plane must reference a declared id. When neither
+is present, planes are unclipped (system kWp is the AC cap). Output includes
+`inverters` and each plane's `inverter`.
 `az` uses Forecast.Solar conventions: 0 = South, -90 = East, 90 = West.
 `GET /api/v1/systems`, `GET /api/v1/systems/{id}`, `DELETE /api/v1/systems/{id}`,
 and `POST /api/v1/systems/{id}/retrain` are also available.
+
+## Horizon
+
+`PUT /api/v1/systems/{system_id}/horizon` accepts a raw UTF-8 CSV body with
+`Content-Type: text/csv` and returns 204. The header must be
+`azimuth_fs,elevation`; 3-360 rows use Forecast.Solar azimuths (-180..180) and
+elevation (-5..90 degrees). Invalid input returns 422. The user horizon
+overrides the PVGIS terrain horizon for this system and persists across restarts.
+
+`GET /api/v1/systems/{system_id}/horizon` returns
+`{"system_id", "source": "user", "points": [{"azimuth_deg", "elevation_deg"}]}`
+in pvlib azimuths, or 404 when no user horizon exists. `DELETE` removes it and
+returns 204, or 404 when absent.
 
 ## Native forecast
 
@@ -53,6 +77,11 @@ periods by local calendar date.
 `period_start` must align to `period_min` (15 or 60). `mean_watts` is derived
 server-side. Push rows override backfill rows; backfill never overrides push.
 The response is `{"accepted": n, "rejected": [{"index": i, "reason": "..."}]}`.
+
+Nightly retraining learns per-model Open-Meteo GHI weights from clear-sky
+telemetry plus stored per-model GHI; accepted weights activate automatically on
+the next weather fetch. Missing data or a failed quality gate keeps the
+configured `OPENMETEO_WEIGHTS`.
 
 ## Benchmark
 

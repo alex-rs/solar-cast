@@ -3,12 +3,25 @@ import pandas as pd
 import pvlib
 import pytest
 
-from app.core.physics_engine import PlaneConfig, SystemConfig, simulate_system
+from app.core.physics_engine import InverterConfig, PlaneConfig, SystemConfig, simulate_system
 from app.core.pvgis_client import Horizon, flat_fallback
 from app.core.timeconv import instant_energy
 
 
 def _system(planes, **kwargs) -> SystemConfig:
+    inverter_kw = kwargs.pop("inverter_kw", None)
+    if inverter_kw is not None:
+        kwargs["inverters"] = (InverterConfig("main", inverter_kw),)
+        planes = [
+            PlaneConfig(
+                dec=plane.dec,
+                az_fs=plane.az_fs,
+                kwp=plane.kwp,
+                plane_id=plane.plane_id,
+                inverter_id="main",
+            )
+            for plane in planes
+        ]
     return SystemConfig(
         system_id="test",
         lat=kwargs.pop("lat", 45.0),
@@ -88,6 +101,26 @@ def test_east_west_share_one_inverter_and_clip():
     east_peak = result.planes["plane1"]["pdc"].idxmax()
     west_peak = result.planes["plane2"]["pdc"].idxmax()
     assert east_peak < west_peak
+
+
+def test_multiple_inverters_clip_independently():
+    system = _system(
+        [
+            PlaneConfig(dec=30, az_fs=-90, kwp=2.5, inverter_id="garage"),
+            PlaneConfig(dec=30, az_fs=90, kwp=2.5, inverter_id="roof"),
+        ],
+        inverters=(
+            InverterConfig("garage", 1.0),
+            InverterConfig("roof", 1.0),
+        ),
+    )
+    weather = _weather("2026-06-20 22:00", "2026-06-22 00:00")
+    result = simulate_system(weather, system, flat_fallback(), clear_sky=True)
+    assert set(result.inverters) == {"garage", "roof"}
+    assert result.inverters["garage"].max() <= 1000.0 + 1e-6
+    assert result.inverters["roof"].max() <= 1000.0 + 1e-6
+    assert result.pac.max() <= 2000.0 + 1e-6
+    assert max(plane["pdc"].max() for plane in result.planes.values()) > 1000.0 + 100.0
 
 
 def test_east_and_west_peaks_straddle_transit():

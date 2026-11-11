@@ -13,7 +13,7 @@ from typing import Any, Iterable, Sequence
 
 LOG = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS systems (
@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS systems (
     updated_at   INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS inverters (
+    system_id   TEXT NOT NULL REFERENCES systems(system_id) ON DELETE CASCADE,
+    inverter_id TEXT NOT NULL,
+    ordinal     INTEGER NOT NULL,
+    ac_kw       REAL NOT NULL CHECK (ac_kw > 0),
+    PRIMARY KEY (system_id, inverter_id),
+    UNIQUE (system_id, ordinal)
+);
+
 CREATE TABLE IF NOT EXISTS planes (
     plane_id   TEXT PRIMARY KEY,
     system_id  TEXT NOT NULL REFERENCES systems(system_id) ON DELETE CASCADE,
@@ -39,6 +48,7 @@ CREATE TABLE IF NOT EXISTS planes (
     dec        REAL NOT NULL CHECK (dec BETWEEN 0 AND 90),
     az_fs      REAL NOT NULL CHECK (az_fs BETWEEN -180 AND 180),
     kwp        REAL NOT NULL CHECK (kwp > 0),
+    inverter_id TEXT,
     UNIQUE (system_id, ordinal)
 );
 
@@ -50,6 +60,34 @@ CREATE TABLE IF NOT EXISTS horizon_cache (
     source        TEXT NOT NULL,
     fetched_at    INTEGER NOT NULL,
     PRIMARY KEY (lat_round, lon_round, azimuth_deg)
+);
+
+CREATE TABLE IF NOT EXISTS system_horizon (
+    system_id    TEXT NOT NULL REFERENCES systems(system_id) ON DELETE CASCADE,
+    azimuth_deg  REAL NOT NULL,
+    elevation_deg REAL NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    PRIMARY KEY (system_id, azimuth_deg)
+);
+
+CREATE TABLE IF NOT EXISTS weather_model_ghi (
+    lat_round   REAL NOT NULL,
+    lon_round   REAL NOT NULL,
+    fetched_at  INTEGER NOT NULL,
+    target_time INTEGER NOT NULL,
+    model       TEXT NOT NULL,
+    ghi         REAL,
+    PRIMARY KEY (lat_round, lon_round, fetched_at, target_time, model)
+);
+
+CREATE TABLE IF NOT EXISTS model_weights (
+    lat_round  REAL NOT NULL,
+    lon_round  REAL NOT NULL,
+    model      TEXT NOT NULL,
+    weight     REAL NOT NULL,
+    samples    INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (lat_round, lon_round, model)
 );
 
 CREATE TABLE IF NOT EXISTS weather_forecast (
@@ -190,6 +228,18 @@ class Database:
         try:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             conn.executescript(SCHEMA_SQL)
+            if version < 2:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(planes)")}
+                if "inverter_id" not in columns:
+                    conn.execute("ALTER TABLE planes ADD COLUMN inverter_id TEXT")
+                conn.execute(
+                    "INSERT OR IGNORE INTO inverters (system_id,inverter_id,ordinal,ac_kw) "
+                    "SELECT system_id,'main',1,inverter_kw FROM systems WHERE inverter_kw IS NOT NULL"
+                )
+                conn.execute(
+                    "UPDATE planes SET inverter_id='main' WHERE inverter_id IS NULL "
+                    "AND system_id IN (SELECT system_id FROM inverters WHERE inverter_id='main')"
+                )
             if version < SCHEMA_VERSION:
                 conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             conn.commit()
@@ -215,8 +265,22 @@ class Database:
         return [dict(row) for row in rows]
 
     # -- systems --------------------------------------------------------
-    def _upsert_system_sync(self, system: dict[str, Any], planes: list[dict[str, Any]]) -> bool:
+    def _upsert_system_sync(
+        self,
+        system: dict[str, Any],
+        planes: list[dict[str, Any]],
+        inverters: list[dict[str, Any]] | None = None,
+    ) -> bool:
         now = int(time.time())
+        if inverters is None:
+            if system.get("inverter_kw") is not None:
+                inverters = [
+                    {"inverter_id": "main", "ac_kw": system["inverter_kw"]}
+                ]
+                planes = [{**plane, "inverter_id": "main"} for plane in planes]
+            else:
+                inverters = []
+                planes = [{**plane, "inverter_id": None} for plane in planes]
         conn = self.conn
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -224,12 +288,32 @@ class Database:
                 "SELECT * FROM systems WHERE system_id=?", (system["system_id"],)
             ).fetchone()
             old_planes = conn.execute(
-                "SELECT dec, az_fs, kwp FROM planes WHERE system_id=? ORDER BY ordinal",
+                "SELECT dec, az_fs, kwp, inverter_id FROM planes "
+                "WHERE system_id=? ORDER BY ordinal",
                 (system["system_id"],),
             ).fetchall()
-            new_geometry = sorted((p["dec"], p["az_fs"], p["kwp"]) for p in planes)
-            old_geometry = sorted((p["dec"], p["az_fs"], p["kwp"]) for p in old_planes)
-            geometry_changed = existing is not None and new_geometry != old_geometry
+            old_inverters = conn.execute(
+                "SELECT inverter_id, ac_kw FROM inverters WHERE system_id=? ORDER BY ordinal",
+                (system["system_id"],),
+            ).fetchall()
+            new_geometry = sorted(
+                (p["dec"], p["az_fs"], p["kwp"], p.get("inverter_id") or "")
+                for p in planes
+            )
+            old_geometry = sorted(
+                (p["dec"], p["az_fs"], p["kwp"], p["inverter_id"] or "")
+                for p in old_planes
+            )
+            new_inverters = sorted(
+                (inv["inverter_id"], float(inv["ac_kw"])) for inv in inverters
+            )
+            old_inverter_geometry = sorted(
+                (inv["inverter_id"], float(inv["ac_kw"])) for inv in old_inverters
+            )
+            geometry_changed = existing is not None and (
+                new_geometry != old_geometry
+                or new_inverters != old_inverter_geometry
+            )
             conn.execute(
                 """
                 INSERT INTO systems (system_id,name,lat,lon,elevation_m,timezone,inverter_kw,
@@ -260,9 +344,21 @@ class Database:
                 ),
             )
             conn.execute("DELETE FROM planes WHERE system_id=?", (system["system_id"],))
+            conn.execute("DELETE FROM inverters WHERE system_id=?", (system["system_id"],))
+            for ordinal, inverter in enumerate(inverters, start=1):
+                conn.execute(
+                    "INSERT INTO inverters (system_id,inverter_id,ordinal,ac_kw) VALUES (?,?,?,?)",
+                    (
+                        system["system_id"],
+                        inverter["inverter_id"],
+                        ordinal,
+                        inverter["ac_kw"],
+                    ),
+                )
             for ordinal, plane in enumerate(planes, start=1):
                 conn.execute(
-                    "INSERT INTO planes (plane_id,system_id,ordinal,dec,az_fs,kwp) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO planes "
+                    "(plane_id,system_id,ordinal,dec,az_fs,kwp,inverter_id) VALUES (?,?,?,?,?,?,?)",
                     (
                         plane.get("plane_id")
                         or plane_id_for(system["system_id"], plane["dec"], plane["az_fs"], plane["kwp"]),
@@ -271,6 +367,7 @@ class Database:
                         plane["dec"],
                         plane["az_fs"],
                         plane["kwp"],
+                        plane.get("inverter_id"),
                     ),
                 )
             if geometry_changed:
@@ -284,8 +381,15 @@ class Database:
             conn.execute("ROLLBACK")
             raise
 
-    async def upsert_system(self, system: dict[str, Any], planes: list[dict[str, Any]]) -> bool:
-        return await asyncio.to_thread(self._upsert_system_sync, system, planes)
+    async def upsert_system(
+        self,
+        system: dict[str, Any],
+        planes: list[dict[str, Any]],
+        inverters: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._upsert_system_sync, system, planes, inverters
+        )
 
     def _get_system_sync(self, system_id: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM systems WHERE system_id=?", (system_id,)).fetchone()
@@ -296,6 +400,12 @@ class Database:
             dict(plane)
             for plane in self.conn.execute(
                 "SELECT * FROM planes WHERE system_id=? ORDER BY ordinal", (system_id,)
+            )
+        ]
+        system["inverters"] = [
+            dict(inverter)
+            for inverter in self.conn.execute(
+                "SELECT * FROM inverters WHERE system_id=? ORDER BY ordinal", (system_id,)
             )
         ]
         return system
@@ -367,8 +477,58 @@ class Database:
 
         await asyncio.to_thread(_write)
 
+    async def get_system_horizon(self, system_id: str) -> list[dict[str, Any]]:
+        return await self.query(
+            "SELECT * FROM system_horizon WHERE system_id=? ORDER BY azimuth_deg",
+            (system_id,),
+        )
+
+    async def put_system_horizon(
+        self,
+        system_id: str,
+        azimuth_deg: list[float],
+        elevation_deg: list[float],
+        updated_at: int,
+    ) -> None:
+        rows = [
+            (system_id, float(az), float(el), int(updated_at))
+            for az, el in zip(azimuth_deg, elevation_deg)
+        ]
+
+        def _write() -> None:
+            conn = self.conn
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "DELETE FROM system_horizon WHERE system_id=?", (system_id,)
+                )
+                conn.executemany(
+                    "INSERT OR REPLACE INTO system_horizon "
+                    "(system_id,azimuth_deg,elevation_deg,updated_at) VALUES (?,?,?,?)",
+                    rows,
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+        await asyncio.to_thread(_write)
+
+    async def delete_system_horizon(self, system_id: str) -> bool:
+        def _delete() -> bool:
+            cur = self.conn.execute(
+                "DELETE FROM system_horizon WHERE system_id=?", (system_id,)
+            )
+            return cur.rowcount > 0
+
+        return await asyncio.to_thread(_delete)
+
     # -- weather --------------------------------------------------------
-    async def store_weather(self, lat: float, lon: float, fetched_at: int, frame) -> None:
+    async def store_weather(
+        self, lat: float, lon: float, fetched_at: int, frame, model_ghi=None
+    ) -> None:
+        import pandas as pd
+
         lat_r, lon_r = round(lat, 3), round(lon, 3)
         rows = [
             (
@@ -376,10 +536,24 @@ class Database:
                 lon_r,
                 int(fetched_at),
                 int(ts.timestamp()),
-                *[None if __import__("pandas").isna(row.get(col)) else float(row.get(col)) for col in WEATHER_COLUMNS],
+                *[None if pd.isna(row.get(col)) else float(row.get(col)) for col in WEATHER_COLUMNS],
             )
             for ts, row in frame.iterrows()
         ]
+        model_rows = []
+        if model_ghi is not None:
+            for ts, row in model_ghi.iterrows():
+                for model, ghi in row.items():
+                    model_rows.append(
+                        (
+                            lat_r,
+                            lon_r,
+                            int(fetched_at),
+                            int(ts.timestamp()),
+                            str(model),
+                            None if pd.isna(ghi) else float(ghi),
+                        )
+                    )
 
         def _write() -> None:
             self.conn.executemany(
@@ -388,6 +562,13 @@ class Database:
                 f"VALUES ({','.join(['?'] * (4 + len(WEATHER_COLUMNS)))})",
                 rows,
             )
+            if model_rows:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO weather_model_ghi "
+                    "(lat_round,lon_round,fetched_at,target_time,model,ghi) "
+                    "VALUES (?,?,?,?,?,?)",
+                    model_rows,
+                )
 
         await asyncio.to_thread(_write)
 
@@ -440,6 +621,86 @@ class Database:
             (round(lat, 3), round(lon, 3), target_ts),
         )
         return rows[0]["ts"] if rows else None
+
+    async def get_weights(self, lat: float, lon: float) -> dict[str, float] | None:
+        rows = await self.query(
+            "SELECT model,weight FROM model_weights WHERE lat_round=? AND lon_round=?",
+            (round(lat, 3), round(lon, 3)),
+        )
+        if not rows:
+            return None
+        return {row["model"]: float(row["weight"]) for row in rows}
+
+    async def put_weights(
+        self,
+        lat: float,
+        lon: float,
+        rows: list[dict[str, Any]],
+        updated_at: int,
+    ) -> None:
+        lat_r, lon_r = round(lat, 3), round(lon, 3)
+        payload = [
+            (
+                lat_r,
+                lon_r,
+                str(row["model"]),
+                float(row["weight"]),
+                int(row["samples"]),
+                int(updated_at),
+            )
+            for row in rows
+        ]
+
+        def _write() -> None:
+            conn = self.conn
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "DELETE FROM model_weights WHERE lat_round=? AND lon_round=?",
+                    (lat_r, lon_r),
+                )
+                conn.executemany(
+                    "INSERT INTO model_weights "
+                    "(lat_round,lon_round,model,weight,samples,updated_at) VALUES (?,?,?,?,?,?)",
+                    payload,
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+        await asyncio.to_thread(_write)
+
+    async def weights_updated_at(self, lat: float, lon: float) -> int | None:
+        rows = await self.query(
+            "SELECT MAX(updated_at) AS ts FROM model_weights "
+            "WHERE lat_round=? AND lon_round=?",
+            (round(lat, 3), round(lon, 3)),
+        )
+        return rows[0]["ts"] if rows else None
+
+    async def model_ghi_latest(
+        self, lat: float, lon: float, start_ts: int
+    ) -> list[dict[str, Any]]:
+        lat_r, lon_r = round(lat, 3), round(lon, 3)
+        return await self.query(
+            """
+            SELECT m.target_time, m.model, m.ghi
+            FROM weather_model_ghi m
+            JOIN (
+                SELECT target_time, model, MAX(fetched_at) AS fetched_at
+                FROM weather_model_ghi
+                WHERE lat_round=? AND lon_round=? AND target_time>=?
+                GROUP BY target_time, model
+            ) latest
+              ON latest.target_time=m.target_time
+             AND latest.model=m.model
+             AND latest.fetched_at=m.fetched_at
+            WHERE m.lat_round=? AND m.lon_round=?
+            ORDER BY m.target_time, m.model
+            """,
+            (lat_r, lon_r, int(start_ts), lat_r, lon_r),
+        )
 
     # -- forecast runs --------------------------------------------------
     async def insert_runs(self, rows: Iterable[dict[str, Any]]) -> None:
@@ -716,6 +977,10 @@ class Database:
                 "DELETE FROM weather_forecast WHERE fetched_at<?", (now_ts - 400 * day,)
             )
             deleted["weather_forecast"] = cur.rowcount
+            cur = conn.execute(
+                "DELETE FROM weather_model_ghi WHERE fetched_at<?", (now_ts - 400 * day,)
+            )
+            deleted["weather_model_ghi"] = cur.rowcount
             cur = conn.execute(
                 "DELETE FROM forecast_runs WHERE fetched_at<?", (now_ts - 400 * day,)
             )

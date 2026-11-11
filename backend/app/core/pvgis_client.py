@@ -69,6 +69,36 @@ def user_horizon(azimuth_fs: list[float], elevation: list[float]) -> Horizon:
     )
 
 
+def parse_horizon_csv(text: str) -> Horizon:
+    lines = [
+        line.strip()
+        for line in text.lstrip("\ufeff").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not lines or lines[0].lower().replace(" ", "") != "azimuth_fs,elevation":
+        raise ValueError("horizon must have header 'azimuth_fs,elevation'")
+    azimuth: list[float] = []
+    elevation: list[float] = []
+    for line in lines[1:]:
+        fields = line.split(",")
+        if len(fields) != 2:
+            raise ValueError("horizon row must contain two numbers")
+        try:
+            azimuth.append(float(fields[0]))
+            elevation.append(float(fields[1]))
+        except ValueError as exc:
+            raise ValueError("horizon row must contain two numbers") from exc
+    if not 3 <= len(azimuth) <= 360:
+        raise ValueError("horizon needs 3-360 points")
+    for value in azimuth:
+        if not -180 <= value <= 180:
+            raise ValueError("azimuth_fs must be between -180 and 180")
+    for value in elevation:
+        if not -5 <= value <= 90:
+            raise ValueError("elevation must be between -5 and 90")
+    return user_horizon(azimuth, elevation)
+
+
 async def fetch_horizon(
     lat: float,
     lon: float,

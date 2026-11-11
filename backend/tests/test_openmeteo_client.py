@@ -56,10 +56,18 @@ def test_parses_real_multimodel_fixture():
     assert (result.frame["dni"] >= 0).all()
     # Fixture has native 15-minute radiation for all three models.
     assert len(result.frame) == len(payload["minutely_15"]["time"])
+    assert list(result.model_ghi.columns) == [
+        "icon_seamless",
+        "ecmwf_ifs025",
+        "gfs_seamless",
+    ]
+    assert result.model_ghi.index.equals(result.frame.index[: len(result.model_ghi)])
 
 
 def test_hourly_join_and_closure():
     result = parse_openmeteo(_payload(), ["alpha", "beta"], [0.5, 0.5], 45.0, 0.0)
+    assert list(result.model_ghi.columns) == ["alpha", "beta"]
+    assert result.model_ghi["beta"].iloc[0] == pytest.approx(1000.0)
     frame = result.frame
     # Preceding-hour sums are split across the four quarter-hours of that hour.
     assert frame.loc["2026-06-21T07:00Z", "precip_mm"] == pytest.approx(2.0)

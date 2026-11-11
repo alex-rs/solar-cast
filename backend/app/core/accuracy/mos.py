@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pvlib
 
-from ..clearsky import simulate_clearsky
+from ..clearsky import clearsky_ghi, simulate_clearsky
 from ..database import Database
 from ..physics_engine import SimResult, SystemConfig
 from ..pvgis_client import Horizon
@@ -107,11 +107,6 @@ def build_features(
     features["days_since_rain"] = _days_since_rain(weather, system.timezone)
     features["snow_depth_m"] = weather["snow_depth_m"].ffill().fillna(0.0)
     return features[FEATURES]
-
-
-def _clear_ghi(index: pd.DatetimeIndex, system: SystemConfig) -> pd.Series:
-    location = pvlib.location.Location(system.lat, system.lon, "UTC", system.elevation_m or 0.0)
-    return location.get_clearsky(index, model="ineichen")["ghi"]
 
 
 class MosModel:
@@ -209,7 +204,7 @@ def _training_frame(
                 int(fetched_at),
                 physics_pac,
                 cs.pac,
-                _clear_ghi(run_index, system),
+                clearsky_ghi(run_index, system),
             )
             features = features.reindex(matching.index).dropna()
             actual = matching["mean_watts"].astype("float64")

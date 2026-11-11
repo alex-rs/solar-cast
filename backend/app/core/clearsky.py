@@ -6,6 +6,7 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
+import pvlib
 
 from .physics_engine import SimResult, SystemConfig, simulate_system
 from .pvgis_client import Horizon
@@ -31,6 +32,13 @@ def clearsky_frame(index: pd.DatetimeIndex) -> pd.DataFrame:
         index=index,
     )
     return frame
+
+
+def clearsky_ghi(index: pd.DatetimeIndex, system: SystemConfig) -> pd.Series:
+    location = pvlib.location.Location(
+        system.lat, system.lon, "UTC", system.elevation_m or 0.0
+    )
+    return location.get_clearsky(index, model="ineichen")["ghi"]
 
 
 def simulate_clearsky(

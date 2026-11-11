@@ -76,6 +76,7 @@ class OpenMeteoResult:
     frame: pd.DataFrame
     elevation_m: float | None
     models: tuple[str, ...]
+    model_ghi: pd.DataFrame
     raw: dict
 
 
@@ -165,6 +166,10 @@ def parse_openmeteo(
                 frame[canonical] = np.nan
         per_model.append(frame[CANONICAL_COLUMNS])
 
+    model_ghi = pd.DataFrame(
+        {model: frame["ghi"] for model, frame in zip(models, per_model)},
+        index=target,
+    )
     blended = pd.DataFrame(index=target, columns=CANONICAL_COLUMNS, dtype="float64")
     for column in CANONICAL_COLUMNS:
         values = np.vstack([frame[column].to_numpy(dtype="float64") for frame in per_model])
@@ -190,6 +195,7 @@ def parse_openmeteo(
         frame=blended,
         elevation_m=float(elevation) if elevation is not None else None,
         models=tuple(models),
+        model_ghi=model_ghi,
         raw=payload,
     )
 
@@ -238,7 +244,7 @@ class OpenMeteoClient:
         self.api_key = api_key
         self.ttl_s = ttl_s
         self._client = client
-        self._cache: dict[tuple[float, float], tuple[float, OpenMeteoResult]] = {}
+        self._cache: dict[tuple, tuple[float, OpenMeteoResult]] = {}
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -269,14 +275,28 @@ class OpenMeteoClient:
         response.raise_for_status()
         return response.json()
 
-    async def get(self, lat: float, lon: float, forecast_days: int = 7) -> OpenMeteoResult:
-        key = (round(lat, 3), round(lon, 3))
+    async def get(
+        self,
+        lat: float,
+        lon: float,
+        forecast_days: int = 7,
+        weights: list[float] | tuple[float, ...] | None = None,
+    ) -> OpenMeteoResult:
+        effective_weights = tuple(self.weights if weights is None else weights)
+        key = (
+            round(lat, 3),
+            round(lon, 3),
+            forecast_days,
+            effective_weights,
+        )
         cached = self._cache.get(key)
         now = time.monotonic()
         if cached and now - cached[0] < self.ttl_s:
             return cached[1]
         payload = await self.fetch_raw(lat, lon, forecast_days)
-        result = parse_openmeteo(payload, self.models, self.weights, lat, lon)
+        result = parse_openmeteo(
+            payload, self.models, effective_weights, lat, lon
+        )
         self._cache[key] = (now, result)
         return result
 

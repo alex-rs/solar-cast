@@ -26,11 +26,12 @@ async def post_telemetry(
     system = await db.get_system(system_id)
     if system is None:
         raise HTTPException(status_code=404, detail="system not found")
-    paco = (
-        float(system["inverter_kw"]) * 1000.0
-        if system.get("inverter_kw")
-        else sum(float(p["kwp"]) for p in system["planes"]) * 1000.0
-    )
+    if system.get("inverters"):
+        paco = sum(float(inv["ac_kw"]) for inv in system["inverters"]) * 1000.0
+    elif system.get("inverter_kw"):
+        paco = float(system["inverter_kw"]) * 1000.0
+    else:
+        paco = sum(float(p["kwp"]) for p in system["planes"]) * 1000.0
     now = dt.datetime.now(dt.timezone.utc)
     accepted_items = []
     rejected: list[RejectedItem] = []

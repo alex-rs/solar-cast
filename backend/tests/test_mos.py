@@ -9,7 +9,7 @@ import pytest
 from app.core.accuracy import mos
 from app.core.clearsky import simulate_clearsky
 from app.core.database import Database
-from app.core.physics_engine import PlaneConfig, SystemConfig
+from app.core.physics_engine import InverterConfig, PlaneConfig, SystemConfig
 from app.core.pvgis_client import flat_fallback
 
 
@@ -43,9 +43,11 @@ def _build_dataset(tmp_path, pattern: str):
         lat=45.0,
         lon=0.0,
         elevation_m=100.0,
-        inverter_kw=5.0,
+        inverters=(InverterConfig("main", 5.0),),
         timezone="UTC",
-        planes=(PlaneConfig(dec=30, az_fs=0, kwp=5.0),),
+        planes=(
+            PlaneConfig(dec=30, az_fs=0, kwp=5.0, inverter_id="main"),
+        ),
     )
     horizon = flat_fallback()
     rng = np.random.default_rng(42)

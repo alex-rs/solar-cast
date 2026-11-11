@@ -15,10 +15,16 @@ import pvlib
 from config.settings import Settings
 
 from .accuracy import calibration, mos, nowcast, shading
-from .clearsky import simulate_clearsky
+from .clearsky import clearsky_ghi, simulate_clearsky
 from .database import Database
 from .openmeteo_client import OpenMeteoClient
-from .physics_engine import PlaneConfig, SimResult, SystemConfig, simulate_system
+from .physics_engine import (
+    InverterConfig,
+    PlaneConfig,
+    SimResult,
+    SystemConfig,
+    simulate_system,
+)
 from .pvgis_client import Horizon, fetch_horizon
 from .timeconv import (
     UTC,
@@ -54,7 +60,13 @@ def system_config(row: dict) -> SystemConfig:
         lat=float(row["lat"]),
         lon=float(row["lon"]),
         elevation_m=float(row["elevation_m"] or 0.0),
-        inverter_kw=float(row["inverter_kw"]) if row.get("inverter_kw") else None,
+        inverters=tuple(
+            InverterConfig(
+                inverter_id=inverter["inverter_id"],
+                ac_kw=float(inverter["ac_kw"]),
+            )
+            for inverter in row["inverters"]
+        ),
         system_loss=float(row["system_loss"]),
         gamma_pdc=float(row["gamma_pdc"]),
         damping_morning=float(row["damping_morning"]),
@@ -66,6 +78,7 @@ def system_config(row: dict) -> SystemConfig:
                 az_fs=float(plane["az_fs"]),
                 kwp=float(plane["kwp"]),
                 plane_id=plane.get("plane_id"),
+                inverter_id=plane.get("inverter_id"),
             )
             for plane in row["planes"]
         ),
@@ -83,6 +96,7 @@ def _with_pac(source: SimResult, pac: pd.Series) -> SimResult:
         azimuth=source.azimuth,
         elevation=source.elevation,
         planes=source.planes,
+        inverters=source.inverters,
     )
 
 
@@ -125,12 +139,24 @@ class ForecastPipeline:
     async def ensure_weather(self, lat: float, lon: float):
         frame, fetched_at = await self.db.latest_weather(lat, lon)
         now = int(time.time())
-        if frame is not None and fetched_at is not None and now - fetched_at < WEATHER_TTL_S:
+        weights_updated = await self.db.weights_updated_at(lat, lon)
+        if (
+            frame is not None
+            and fetched_at is not None
+            and now - fetched_at < WEATHER_TTL_S
+            and (weights_updated is None or weights_updated <= fetched_at)
+        ):
             return frame, fetched_at
         try:
-            result = await self.weather.get(lat, lon)
+            stored = await self.db.get_weights(lat, lon)
+            weights = None
+            if stored and all(model in stored for model in self.settings.openmeteo_models):
+                weights = [stored[model] for model in self.settings.openmeteo_models]
+            result = await self.weather.get(lat, lon, weights=weights)
             fetched_at = now
-            await self.db.store_weather(lat, lon, fetched_at, result.frame)
+            await self.db.store_weather(
+                lat, lon, fetched_at, result.frame, result.model_ghi
+            )
             if result.elevation_m is not None:
                 for system in await self.db.list_systems():
                     if round(system["lat"], 3) == round(lat, 3) and round(
@@ -149,9 +175,19 @@ class ForecastPipeline:
         refreshed = 0
         for lat, lon in locations:
             try:
-                result = await self.weather.get(lat, lon)
+                stored = await self.db.get_weights(lat, lon)
+                weights = None
+                if stored and all(
+                    model in stored for model in self.settings.openmeteo_models
+                ):
+                    weights = [
+                        stored[model] for model in self.settings.openmeteo_models
+                    ]
+                result = await self.weather.get(lat, lon, weights=weights)
                 fetched_at = int(time.time())
-                await self.db.store_weather(lat, lon, fetched_at, result.frame)
+                await self.db.store_weather(
+                    lat, lon, fetched_at, result.frame, result.model_ghi
+                )
                 for system in await self.db.list_systems():
                     if round(system["lat"], 3) == lat and round(system["lon"], 3) == lon:
                         if result.elevation_m is not None:
@@ -182,11 +218,21 @@ class ForecastPipeline:
         )
         return horizon
 
+    async def ensure_horizon_for_system(self, system_row: dict) -> Horizon:
+        rows = await self.db.get_system_horizon(system_row["system_id"])
+        if rows:
+            return Horizon(
+                azimuth=np.array([float(r["azimuth_deg"]) for r in rows]),
+                elevation=np.array([float(r["elevation_deg"]) for r in rows]),
+                source="user",
+            )
+        return await self.ensure_horizon(system_row["lat"], system_row["lon"])
+
     # -- layers ---------------------------------------------------------
     async def compute_layers(self, system_row: dict, regenerate: bool = False) -> LayerResult:
         system = system_config(system_row)
         weather, fetched_at = await self.ensure_weather(system.lat, system.lon)
-        horizon = await self.ensure_horizon(system.lat, system.lon)
+        horizon = await self.ensure_horizon_for_system(system_row)
 
         base = simulate_system(weather, system, horizon, calibration_c=1.0)
         c_row = await self.db.get_calibration(system.system_id)
@@ -200,7 +246,7 @@ class ForecastPipeline:
         if model is not None:
             cs = simulate_clearsky(weather.index, system, horizon)
             cs_pac = cs.pac
-            clear_ghi = mos._clear_ghi(weather.index, system)
+            clear_ghi = clearsky_ghi(weather.index, system)
             features = mos.build_features(
                 weather, system, fetched_at, physics.pac, cs_pac, clear_ghi
             )
@@ -386,11 +432,16 @@ class ForecastPipeline:
         written = 0
         for system_row in await self.db.list_systems():
             try:
+                inverters = system_row.get("inverters") or []
                 written += await fetch_system_shadow(
                     self.db,
                     system_row,
                     self.fs_client,
-                    inverter_kw=system_row.get("inverter_kw"),
+                    inverter_kw=(
+                        sum(float(inv["ac_kw"]) for inv in inverters)
+                        if inverters
+                        else system_row.get("inverter_kw")
+                    ),
                 )
             except Exception as exc:
                 LOG.warning("Forecast.Solar shadow failed for %s: %s", system_row["system_id"], exc)
@@ -455,12 +506,22 @@ class ForecastPipeline:
                 lat=lat,
                 lon=lon,
                 elevation_m=0.0,
-                inverter_kw=inverter_kw,
+                inverters=(
+                    (InverterConfig("main", inverter_kw),)
+                    if inverter_kw is not None
+                    else ()
+                ),
                 timezone=timezone,
                 damping_morning=damping_morning,
                 damping_evening=damping_evening,
                 planes=tuple(
-                    PlaneConfig(dec=dec, az_fs=az, kwp=kwp) for dec, az, kwp in planes
+                    PlaneConfig(
+                        dec=dec,
+                        az_fs=az,
+                        kwp=kwp,
+                        inverter_id="main" if inverter_kw is not None else None,
+                    )
+                    for dec, az, kwp in planes
                 ),
             )
             sim = simulate_system(weather, system, horizon, calibration_c=1.0)
@@ -479,10 +540,20 @@ class ForecastPipeline:
             )
             if have != wanted:
                 continue
-            registered_inverter = system.get("inverter_kw")
-            if inverter_kw is not None and registered_inverter is not None:
-                if abs(float(inverter_kw) - float(registered_inverter)) > 1e-6:
+            registered_inverters = system.get("inverters") or []
+            if len(registered_inverters) == 1:
+                registered_inverter = float(registered_inverters[0]["ac_kw"])
+            elif not registered_inverters:
+                registered_inverter = system.get("inverter_kw")
+            else:
+                registered_inverter = None
+            if inverter_kw is not None:
+                if registered_inverter is None or abs(
+                    float(inverter_kw) - float(registered_inverter)
+                ) > 1e-6:
                     continue
+            elif len(registered_inverters) > 1:
+                continue
             return system
         return None
 
@@ -496,7 +567,9 @@ class ForecastPipeline:
         wh_cumulative: dict[str, float] = {}
         wh_day: dict[str, float] = {}
         inverter_cap = (
-            float(system.inverter_kw) * 1000.0 if system.inverter_kw is not None else None
+            sum(inverter.ac_kw for inverter in system.inverters) * 1000.0
+            if system.inverters
+            else None
         )
 
         for offset in (0, 1):
