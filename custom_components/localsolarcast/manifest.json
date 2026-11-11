@@ -1,13 +1,17 @@
 {
   "domain": "localsolarcast",
   "name": "LocalSolarCast",
-  "version": "1.1.0",
+  "after_dependencies": [
+    "recorder"
+  ],
+  "codeowners": [
+    "@alex-rs"
+  ],
   "config_flow": true,
-  "iot_class": "local_polling",
-  "integration_type": "service",
   "documentation": "https://github.com/alex-rs/solar-cast",
+  "integration_type": "service",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/alex-rs/solar-cast/issues",
-  "codeowners": ["@alex-rs"],
-  "after_dependencies": ["recorder"],
-  "requirements": []
+  "requirements": [],
+  "version": "1.1.0"
 }
