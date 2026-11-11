@@ -41,13 +41,18 @@ async def test_compat_matches_golden_structure(api, fs_fixture):
     assert list(result["watts"]) == list(result["watt_hours_period"]) == list(result["watt_hours"])
 
     fixture_keys = list(fs_fixture["result"]["watts"])
-    fixture_days = {key[:10] for key in fixture_keys}
-    assert {key[:10] for key in result["watts"]} == fixture_days
-    for day in fixture_days:
+    fixture_days = sorted({key[:10] for key in fixture_keys})
+    # The fixture is a snapshot; only its day structure is stable.
+    result_days = sorted({key[:10] for key in result["watts"]})
+    assert len(result_days) == len(fixture_days) == 2
+    assert (
+        dt.date.fromisoformat(result_days[1]) - dt.date.fromisoformat(result_days[0])
+    ).days == 1
+    for day in result_days:
         day_keys = [key for key in result["watts"] if key[:10] == day]
         assert day_keys[0] < day_keys[1]
     # Cumulative watt_hours matches period sums and the daily totals per local day.
-    for day in fixture_days:
+    for day in result_days:
         keys = [key for key in result["watt_hours"] if key[:10] == day]
         total = sum(result["watt_hours_period"][key] for key in keys)
         assert result["watt_hours"][keys[-1]] == pytest.approx(total)
@@ -64,6 +69,7 @@ async def test_compat_matches_golden_structure(api, fs_fixture):
         "timezone",
         "time",
         "time_utc",
+        "solarcast",
     }
     assert set(message["ratelimit"]) == {"zone", "period", "limit", "remaining"}
     assert message["info"]["timezone"] == "Europe/Belgrade"
@@ -87,3 +93,24 @@ async def test_compat_anchors_bracket_hourly_keys(api):
         assert last >= max(hourly)
         assert first < min(hourly)
         assert last >= max(hourly)
+
+
+@pytest.mark.asyncio
+async def test_compat_reports_matched_system(api):
+    from tests.conftest import system_body
+
+    await api.put("/api/v1/systems/home", json=system_body())
+    matched = (
+        await api.get("/estimate/44.8125/20.4612/30/0/5", params={"inverter": 5.0})
+    ).json()
+    info = matched["message"]["info"]["solarcast"]
+    assert info["matched_system"] == "home"
+    assert set(info["layers_active"]) == {"calibration", "shading", "mos", "nowcast"}
+    assert info["layers_active"]["calibration"] is False
+
+    unmatched = (
+        await api.get("/estimate/44.8125/20.4612/30/0/4", params={"inverter": 5.0})
+    ).json()
+    info = unmatched["message"]["info"]["solarcast"]
+    assert info["matched_system"] is None
+    assert info["layers_active"] == {}

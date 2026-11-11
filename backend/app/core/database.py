@@ -15,6 +15,10 @@ LOG = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 2
 
+# Telemetry write precedence: a user correction outranks the pusher, which
+# outranks a recorder backfill. Unknown origins rank as a push.
+_ORIGIN_RANK = {"backfill": 0, "push": 1, "manual": 2}
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS systems (
     system_id    TEXT PRIMARY KEY,
@@ -759,8 +763,12 @@ class Database:
                     "SELECT origin FROM actual_telemetry WHERE system_id=? AND period_start=? AND period_min=?",
                     (system_id, item["period_start"], item["period_min"]),
                 ).fetchone()
-                if existing and existing["origin"] == "push" and item["origin"] == "backfill":
-                    continue
+                if existing is not None:
+                    # A user correction outranks the pusher, which outranks a backfill.
+                    if _ORIGIN_RANK.get(existing["origin"], _ORIGIN_RANK["push"]) > _ORIGIN_RANK[
+                        item["origin"]
+                    ]:
+                        continue
                 conn.execute(
                     "INSERT OR REPLACE INTO actual_telemetry "
                     "(system_id,period_start,period_min,energy_wh,mean_watts,curtailed,inverter_temp_c,origin) "
@@ -785,6 +793,25 @@ class Database:
 
     async def upsert_telemetry(self, system_id: str, items: list[dict[str, Any]]) -> int:
         return await asyncio.to_thread(self._upsert_telemetry_sync, system_id, items)
+
+    def _delete_telemetry_sync(self, system_id: str, start_ts: int, end_ts: int) -> int:
+        conn = self.conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                "DELETE FROM actual_telemetry WHERE system_id=? AND period_start>=? AND period_start<?",
+                (system_id, start_ts, end_ts),
+            )
+            deleted = cur.rowcount
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        return deleted
+
+    async def delete_telemetry(self, system_id: str, start_ts: int, end_ts: int) -> int:
+        """Delete telemetry whose period_start falls in ``[start_ts, end_ts)``."""
+        return await asyncio.to_thread(self._delete_telemetry_sync, system_id, start_ts, end_ts)
 
     async def telemetry(
         self, system_id: str, start_ts: int | None = None, end_ts: int | None = None

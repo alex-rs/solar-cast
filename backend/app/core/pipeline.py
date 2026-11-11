@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -52,6 +52,8 @@ class LayerResult:
     calibration_c: float
     active: dict[str, bool]
     nowcast_active: bool
+    nowcast_buckets: int = 0
+    learning: dict[str, object] = field(default_factory=dict)
 
 
 def system_config(row: dict) -> SystemConfig:
@@ -255,29 +257,42 @@ class ForecastPipeline:
 
         telemetry = await self.db.last_telemetry(system.system_id)
         now = dt.datetime.now(UTC)
-        reference_start = None
-        reference_watts = None
+        last_seen = None
+        if telemetry is not None:
+            last_seen = ts_to_dt(telemetry["period_start"]) + dt.timedelta(
+                minutes=int(telemetry["period_min"])
+            )
+        age_minutes = (
+            round((now - last_seen).total_seconds() / 60.0, 1) if last_seen is not None else None
+        )
+        nowcast_buckets = 0
         nowcast_active = False
         final = hybrid
         if telemetry is not None:
             cs_ref = simulate_clearsky(
                 weather.index, system, horizon, shading=lookup, calibration_c=calibration_c
             )
-            ref = nowcast.reference_from_telemetry(
-                telemetry,
+            recent = await self.db.telemetry(
+                system.system_id,
+                int(now.timestamp()) - 3600,
+                int(now.timestamp()) + 1,
+            )
+            ref = nowcast.deltas_from_telemetry(
+                recent,
                 now,
-                nowcast.reference_zenith(cs_ref.zenith, ts_to_dt(telemetry["period_start"])),
+                cs_ref.pac,
+                hybrid.pac,
+                cs_ref.zenith,
+                0.1 * system.kwp_total * 1000.0,
             )
             if ref is not None:
-                reference_start, reference_watts = ref
+                anchor_start, delta_k, nowcast_buckets = ref
                 final_pac, nowcast_active = nowcast.apply(
-                    now,
                     hybrid.pac,
                     cs_ref.pac,
-                    reference_start,
-                    reference_watts,
+                    anchor_start,
+                    delta_k,
                     physics.paco,
-                    system.kwp_total,
                 )
                 final = _with_pac(physics, final_pac)
 
@@ -294,6 +309,17 @@ class ForecastPipeline:
                 "nowcast": nowcast_active,
             },
             nowcast_active=nowcast_active,
+            nowcast_buckets=nowcast_buckets,
+            learning={
+                "calibration_c": round(calibration_c, 4),
+                "calibration_days": int(c_row["clear_days"]) if c_row else 0,
+                "mos": model is not None,
+                "shading": lookup is not None,
+                "nowcast": nowcast_active,
+                "nowcast_buckets": nowcast_buckets,
+                "telemetry_last_seen": last_seen.isoformat() if last_seen else None,
+                "telemetry_age_minutes": age_minutes,
+            },
         )
 
     def _layer(self, layers: LayerResult, name: str) -> SimResult:
@@ -332,6 +358,7 @@ class ForecastPipeline:
             "kwp_total": system.kwp_total,
             "ac_limit_w": sim.paco,
             "layers_active": layers.active,
+            "learning": layers.learning,
             "periods": periods,
             "daily": daily,
         }
@@ -496,10 +523,14 @@ class ForecastPipeline:
         weather, fetched_at = await self.ensure_weather(lat, lon)
         horizon = await self.ensure_horizon(lat, lon)
         registered = await self._match_registered(lat, lon, planes, inverter_kw)
+        matched_system = None
+        layers_active: dict[str, bool] = {}
         if registered is not None:
             layers = await self.compute_layers(registered)
             sim = layers.final
             system = system_config(registered)
+            matched_system = registered["system_id"]
+            layers_active = layers.active
         else:
             system = SystemConfig(
                 system_id="compat",
@@ -525,7 +556,13 @@ class ForecastPipeline:
                 ),
             )
             sim = simulate_system(weather, system, horizon, calibration_c=1.0)
-        return self._compat_payload(sim, system, timezone)
+        return self._compat_payload(
+            sim,
+            system,
+            timezone,
+            matched_system=matched_system,
+            layers_active=layers_active,
+        )
 
     async def _match_registered(
         self, lat: float, lon: float, planes: list[tuple[float, float, float]], inverter_kw
@@ -557,7 +594,14 @@ class ForecastPipeline:
             return system
         return None
 
-    def _compat_payload(self, sim: SimResult, system: SystemConfig, timezone: str) -> dict:
+    def _compat_payload(
+        self,
+        sim: SimResult,
+        system: SystemConfig,
+        timezone: str,
+        matched_system: str | None = None,
+        layers_active: dict[str, bool] | None = None,
+    ) -> dict:
         tz = ZoneInfo(timezone)
         now = dt.datetime.now(UTC)
         energy = instant_energy(sim.pac)
@@ -629,6 +673,10 @@ class ForecastPipeline:
             "timezone": timezone,
             "time": now.astimezone(tz).isoformat(),
             "time_utc": now.isoformat(),
+            "solarcast": {
+                "matched_system": matched_system,
+                "layers_active": dict(layers_active or {}),
+            },
         }
         return {
             "result": {

@@ -105,6 +105,17 @@ class HorizonOut(BaseModel):
     points: list[HorizonPoint]
 
 
+class LearningOut(BaseModel):
+    calibration_c: float
+    calibration_days: int
+    mos: bool
+    shading: bool
+    nowcast: bool
+    nowcast_buckets: int
+    telemetry_last_seen: str | None
+    telemetry_age_minutes: float | None
+
+
 class ForecastOut(BaseModel):
     system_id: str
     generated_at: str
@@ -115,6 +126,7 @@ class ForecastOut(BaseModel):
     kwp_total: float
     ac_limit_w: float
     layers_active: dict[str, bool]
+    learning: LearningOut
     periods: list[PeriodOut]
     daily: list[DailyOut]
 
@@ -148,8 +160,8 @@ class TelemetryBatchIn(BaseModel):
     @field_validator("origin")
     @classmethod
     def _origin(cls, value: str) -> str:
-        if value not in ("push", "backfill"):
-            raise ValueError("origin must be push or backfill")
+        if value not in ("push", "backfill", "manual"):
+            raise ValueError("origin must be push, backfill or manual")
         return value
 
 
@@ -161,6 +173,12 @@ class RejectedItem(BaseModel):
 class TelemetryBatchOut(BaseModel):
     accepted: int
     rejected: list[RejectedItem]
+
+
+class TelemetryDeleteOut(BaseModel):
+    deleted: int
+    start: str
+    end: str
 
 
 class HealthOut(BaseModel):

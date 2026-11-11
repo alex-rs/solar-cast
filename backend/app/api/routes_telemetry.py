@@ -3,13 +3,18 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_db, get_pipeline, require_auth
 from app.core.database import Database
 from app.core.pipeline import ForecastPipeline
 from app.core.timeconv import is_aligned
-from app.schemas.native import TelemetryBatchIn, TelemetryBatchOut, RejectedItem
+from app.schemas.native import (
+    RejectedItem,
+    TelemetryBatchIn,
+    TelemetryBatchOut,
+    TelemetryDeleteOut,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -71,3 +76,29 @@ async def post_telemetry(
     accepted = await db.upsert_telemetry(system_id, accepted_items) if accepted_items else 0
     pipeline.invalidate()
     return TelemetryBatchOut(accepted=accepted, rejected=rejected)
+
+
+@router.delete("/{system_id}/telemetry", response_model=TelemetryDeleteOut)
+async def delete_telemetry(
+    system_id: str,
+    start: dt.datetime = Query(..., description="Inclusive ISO 8601 start of the range"),
+    end: dt.datetime = Query(..., description="Exclusive ISO 8601 end of the range"),
+    db: Database = Depends(get_db),
+    pipeline: ForecastPipeline = Depends(get_pipeline),
+) -> TelemetryDeleteOut:
+    if start.tzinfo is None or end.tzinfo is None:
+        raise HTTPException(status_code=422, detail="start and end must be timezone aware")
+    start_utc = start.astimezone(dt.timezone.utc)
+    end_utc = end.astimezone(dt.timezone.utc)
+    if end_utc <= start_utc:
+        raise HTTPException(status_code=422, detail="end must be after start")
+    if await db.get_system(system_id) is None:
+        raise HTTPException(status_code=404, detail="system not found")
+    deleted = await db.delete_telemetry(
+        system_id, int(start_utc.timestamp()), int(end_utc.timestamp())
+    )
+    pipeline.invalidate()
+    LOG.info("deleted %s telemetry rows for %s in [%s, %s)", deleted, system_id, start_utc, end_utc)
+    return TelemetryDeleteOut(
+        deleted=deleted, start=start_utc.isoformat(), end=end_utc.isoformat()
+    )

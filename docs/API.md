@@ -60,6 +60,26 @@ Periods are labeled by their start and serialized as ISO 8601 with UTC offset.
 `wh` is energy for the period; `mean_watts = wh / (resolution/60)`. `daily` sums
 periods by local calendar date.
 
+`learning` states which correction layers are active and how fresh the data is:
+
+```json
+{
+  "calibration_c": 0.93,
+  "calibration_days": 7,
+  "mos": true,
+  "shading": false,
+  "nowcast": true,
+  "nowcast_buckets": 3,
+  "telemetry_last_seen": "2026-11-12T10:45:00+00:00",
+  "telemetry_age_minutes": 12.5
+}
+```
+
+`calibration_days` is the number of clear days behind `calibration_c` (0 when
+uncalibrated). `nowcast_buckets` counts the telemetry buckets that fed the
+intraday correction (0-4). `layers_active` is the same information for existing
+clients and remains supported.
+
 ## MCP (optional)
 
 `ENABLE_MCP=true` mounts a read-only MCP server (Streamable HTTP) at `/mcp` on
@@ -94,8 +114,21 @@ The server exposes no write tools: no system CRUD, telemetry or retraining.
 ```
 
 `period_start` must align to `period_min` (15 or 60). `mean_watts` is derived
-server-side. Push rows override backfill rows; backfill never overrides push.
+server-side. `origin` is `push` (HA pusher), `backfill` (recorder import) or
+`manual` (user correction); precedence is `manual` > `push` > `backfill`, so a
+manual row is never overwritten by a later push or backfill, and a backfill
+never overwrites either. Equal origins replace in place (idempotent re-push).
 The response is `{"accepted": n, "rejected": [{"index": i, "reason": "..."}]}`.
+
+`DELETE /api/v1/systems/{system_id}/telemetry?start=<iso>&end=<iso>`
+
+Deletes telemetry whose `period_start` falls in `[start, end)`. Both bounds are
+required, timezone-aware ISO 8601; `end` must be after `start` (422
+otherwise), and an unknown system is 404. Returns
+`{"deleted": n, "start": iso, "end": iso}`. Deleting does not retrain
+immediately: calibration, shading and MOS pick up the correction at the next
+nightly retrain (01:30 local), while the intraday nowcast ignores telemetry
+older than its 45-minute window anyway.
 
 Nightly retraining learns per-model Open-Meteo GHI weights from clear-sky
 telemetry plus stored per-model GHI; accepted weights activate automatically on
@@ -123,6 +156,14 @@ The response mirrors Forecast.Solar: `result.watts`,
 and the `message` block. Keys are local `"YYYY-MM-DD HH:MM:SS"` period ends with
 sunrise/sunset anchors. Registered systems that match the coordinates exactly use
 the `final` layer; ad-hoc requests use `physics_base`.
+
+`message.info.solarcast` states which branch ran:
+`{"matched_system": "home", "layers_active": {"calibration": true, "shading": true,
+"mos": false, "nowcast": true}}`, or `{"matched_system": null, "layers_active": {}}`
+for an ad-hoc request. A match requires latitude/longitude within `1e-6`, `dec`/`az`
+rounded to 0.1 and `kwp` rounded to 0.001 against the registered planes, the same
+inverter AC rating when `inverter` is given, and a single-inverter system — so a
+tuned system silently falls back to uncorrected physics unless this reports the id.
 
 ## Health
 

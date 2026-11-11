@@ -155,3 +155,44 @@ async def test_auth_required_when_token_set(api):
     ok = await api.get("/api/v1/systems", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
     api.app.state.settings.api_token = None
+
+
+@pytest.mark.asyncio
+async def test_forecast_learning_block(api):
+    await api.put("/api/v1/systems/home", json=system_body())
+    response = await api.get("/api/v1/systems/home/forecast", params={"days": 1})
+    assert response.status_code == 200, response.text
+    learning = response.json()["learning"]
+    assert learning["calibration_c"] == pytest.approx(1.0)
+    assert learning["calibration_days"] == 0
+    assert learning["mos"] is False
+    assert learning["shading"] is False
+    assert learning["nowcast"] is False
+    assert learning["nowcast_buckets"] == 0
+    assert learning["telemetry_last_seen"] is None
+    assert learning["telemetry_age_minutes"] is None
+
+    now = dt.datetime.now(dt.timezone.utc)
+    start = (now - dt.timedelta(minutes=15)).replace(minute=0, second=0, microsecond=0)
+    start = start.replace(minute=start.minute - start.minute % 15)
+    posted = await api.post(
+        "/api/v1/systems/home/telemetry",
+        json={
+            "items": [
+                {
+                    "period_start": start.isoformat(),
+                    "period_min": 15,
+                    "energy_wh": 120.0,
+                }
+            ]
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    assert posted.json()["accepted"] == 1
+
+    refreshed = (await api.get("/api/v1/systems/home/forecast", params={"days": 1})).json()
+    learning = refreshed["learning"]
+    assert learning["telemetry_last_seen"] is not None
+    assert learning["telemetry_age_minutes"] is not None
+    assert 0 <= learning["telemetry_age_minutes"] <= 60
+    assert learning["nowcast_buckets"] in (0, 1)
