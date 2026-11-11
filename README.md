@@ -113,7 +113,7 @@ $$
 retrospective clear-sky power give
 
 $$
-K = \operatorname{clip}\left(
+K = \mathrm{clip}\left(
 \frac{P_{measured}/(C\,P_{clear}) - f_d}{f_b},\, 0,\, 1.1
 \right)
 $$
@@ -165,8 +165,8 @@ spans and is clipped to `[0, 1]`.
 Planes are grouped by inverter. Each group is clipped independently:
 
 $$
-P_{ac} = \operatorname{clip}\left(
-\operatorname{PVWattsInverter}(P_{dc,group}, P_{aco}),\,
+P_{ac} = \mathrm{clip}\left(
+\mathrm{PVWattsInverter}(P_{dc,group}, P_{aco}),\,
 0,\, P_{aco}
 \right), \qquad P_{aco} = ac\_kW \times 1000
 $$
@@ -185,7 +185,7 @@ least 0.6, and a coefficient of variation below 0.15. The factor is the median
 of high-sun, beam-dominated ratios over at least three clear days:
 
 $$
-C = \operatorname{clip}\left(\operatorname{median}\left[
+C = \mathrm{clip}\left(\mathrm{median}\left[
 P_{measured} / P_{clear}\right],\, 0.6,\, 1.2\right)
 $$
 
@@ -214,7 +214,7 @@ $$
 The hybrid output is
 
 $$
-P_{hybrid} = \operatorname{clip}\left(
+P_{hybrid} = \mathrm{clip}\left(
 P_{physics} + r(x)\, kWp_{total} \times 1000,\,
 0,\, P_{aco}
 \right)
@@ -228,7 +228,7 @@ The latest telemetry period within 30 minutes is converted to a measured
 clear-sky index:
 
 $$
-k_{meas} = \operatorname{clip}\left(P_{measured}/P_{clear},\, 0,\, 1.5\right)
+k_{meas} = \mathrm{clip}\left(P_{measured}/P_{clear},\, 0,\, 1.5\right)
 $$
 
 For the next three hours, the forecast clear-sky index is corrected with an
@@ -240,7 +240,7 @@ e^{-(t-t_0)/90}
 $$
 
 $$
-P_{final} = \operatorname{clip}\left(k(t) P_{clear}(t),\, 0,\, P_{aco}\right)
+P_{final} = \mathrm{clip}\left(k(t) P_{clear}(t),\, 0,\, P_{aco}\right)
 $$
 
 `90` is the decay time constant in minutes. Night periods and periods without a
