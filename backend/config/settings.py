@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -22,10 +23,12 @@ class Settings(BaseSettings):
     scheduler_tz: str | None = None
     openmeteo_base_url: str = "https://api.open-meteo.com"
     openmeteo_api_key: str | None = None
-    openmeteo_models: list[str] = Field(
+    openmeteo_models: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["icon_seamless", "ecmwf_ifs025", "gfs_seamless"]
     )
-    openmeteo_weights: list[float] = Field(default_factory=lambda: [0.50, 0.35, 0.15])
+    openmeteo_weights: Annotated[list[float], NoDecode] = Field(
+        default_factory=lambda: [0.50, 0.35, 0.15]
+    )
     enable_fs_shadow_benchmark: bool = True
     systems_file: Path = BASE_DIR / "config" / "systems.yaml"
     log_level: str = "INFO"
