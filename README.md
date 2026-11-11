@@ -1,5 +1,7 @@
 # SolarCast
 
+![SolarCast cover](docs/cover-solar-cast.jpeg)
+
 Self-hosted PV production forecasting: a FastAPI backend that blends Open-Meteo
 ensemble weather with `pvlib` physics, plus a Home Assistant (HACS) integration
 that feeds the Energy dashboard.
