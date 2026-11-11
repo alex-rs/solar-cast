@@ -30,6 +30,7 @@ class Settings(BaseSettings):
         default_factory=lambda: [0.50, 0.35, 0.15]
     )
     enable_fs_shadow_benchmark: bool = True
+    enable_mcp: bool = False
     systems_file: Path = BASE_DIR / "config" / "systems.yaml"
     log_level: str = "INFO"
     pvgis_base_url: str = "https://re.jrc.ec.europa.eu/api"

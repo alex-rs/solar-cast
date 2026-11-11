@@ -60,6 +60,25 @@ Periods are labeled by their start and serialized as ISO 8601 with UTC offset.
 `wh` is energy for the period; `mean_watts = wh / (resolution/60)`. `daily` sums
 periods by local calendar date.
 
+## MCP (optional)
+
+`ENABLE_MCP=true` mounts a read-only MCP server (Streamable HTTP) at `/mcp` on
+the same port. When `API_TOKEN` is set, requests require
+`Authorization: Bearer <token>`; an empty `API_TOKEN` leaves the endpoint
+unauthenticated, like the rest of the API. With the flag unset, `/mcp` is a
+plain 404 and the MCP SDK is not imported.
+
+Tools:
+
+- `list_systems` returns `{"systems": [{"system_id", "name", "timezone", "lat",
+  "lon", "kwp_total"}]}`.
+- `get_forecast(system_id, days=3, resolution=60, layer="final")` returns the
+  native forecast payload. `days` must be 1-7, `resolution` is 15 or 60, and
+  `layer` is `final`, `hybrid`, `physics` or `physics_base`. Unknown systems and
+  out-of-range days are reported as MCP tool errors.
+
+The server exposes no write tools: no system CRUD, telemetry or retraining.
+
 ## Telemetry
 
 `POST /api/v1/systems/{system_id}/telemetry`

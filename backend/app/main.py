@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 import yaml
 from fastapi import FastAPI
@@ -91,6 +91,7 @@ def create_app(
     app_settings = settings or get_settings()
     _configure_logging(app_settings.log_level)
     database = db or Database(app_settings.database_path)
+    mcp_server = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -105,19 +106,22 @@ def create_app(
             horizon_fetcher=horizon_fetcher,
         )
         await _load_static_systems(database, app.state.pipeline, app_settings.systems_file)
-        scheduler = None
-        if enable_scheduler:
-            from .jobs.scheduler import create_scheduler, resolve_scheduler_tz
+        async with AsyncExitStack() as stack:
+            if mcp_server is not None:
+                await stack.enter_async_context(mcp_server.session_manager.run())
+            scheduler = None
+            if enable_scheduler:
+                from .jobs.scheduler import create_scheduler, resolve_scheduler_tz
 
-            timezone = resolve_scheduler_tz(app_settings, await database.list_systems())
-            scheduler = create_scheduler(app_settings, database, app.state.pipeline, timezone)
-            scheduler.start()
-            app.state.scheduler = scheduler
-            app.state.scheduler_tz = str(scheduler.timezone)
-            LOG.info("scheduler started in timezone %s", scheduler.timezone)
-        yield
-        if scheduler is not None:
-            scheduler.shutdown(wait=False)
+                timezone = resolve_scheduler_tz(app_settings, await database.list_systems())
+                scheduler = create_scheduler(app_settings, database, app.state.pipeline, timezone)
+                scheduler.start()
+                app.state.scheduler = scheduler
+                app.state.scheduler_tz = str(scheduler.timezone)
+                LOG.info("scheduler started in timezone %s", scheduler.timezone)
+            yield
+            if scheduler is not None:
+                scheduler.shutdown(wait=False)
         await database.close()
 
     app = FastAPI(title="SolarCast", version="1.3.0", lifespan=lifespan)
@@ -127,6 +131,21 @@ def create_app(
     app.include_router(routes_telemetry.router)
     app.include_router(routes_benchmark.router)
     app.include_router(routes_health.router)
+    if app_settings.enable_mcp:
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        from .mcp_server import MCPAuthMiddleware, build_mcp_server
+
+        mcp_server = build_mcp_server(app)
+        mcp_app = mcp_server.streamable_http_app(
+            json_response=True,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=False
+            ),
+        )
+        if app_settings.api_token:
+            mcp_app.add_middleware(MCPAuthMiddleware, token=app_settings.api_token)
+        app.mount("/", mcp_app)
     return app
 
 

@@ -13,3 +13,5 @@ services:
       - TZ=Europe/Belgrade
       - API_TOKEN=change-me
       - ENABLE_FS_SHADOW_BENCHMARK=true
+      # set true to expose the read-only MCP server at /mcp
+      - ENABLE_MCP=false

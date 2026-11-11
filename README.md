@@ -35,6 +35,43 @@ Forecast.Solar-compatible: `/estimate/{lat}/{lon}/{dec}/{az}/{kwp}`.
 
 Docker: `cd backend && docker compose up -d`.
 
+### MCP server (optional)
+
+`ENABLE_MCP=true` exposes a read-only MCP server (Streamable HTTP) at
+`http://localhost:8000/mcp`; it is disabled by default and `/mcp` is then a
+plain 404. Docker Compose ships the switch, defaulting to `false`, in
+`backend/docker-compose.yml`:
+
+```yaml
+environment:
+  - API_TOKEN=change-me
+  # set true to expose the read-only MCP server at /mcp
+  - ENABLE_MCP=false
+```
+
+Set `API_TOKEN` and pass `Authorization: Bearer <token>` — with an empty
+`API_TOKEN` the endpoint is unauthenticated, like the rest of the API.
+
+Tools:
+
+- `list_systems` returns `{"systems": [{"system_id", "name", "timezone", "lat", "lon", "kwp_total"}]}`.
+- `get_forecast(system_id, days=3, resolution=60, layer="final")` returns the
+  native forecast payload. `days` is 1-7, `resolution` is 15 or 60, and `layer`
+  is `final`, `hybrid`, `physics` or `physics_base`.
+
+The server is read-only: no system CRUD, telemetry or retraining.
+
+```json
+{
+  "mcpServers": {
+    "solarcast": {
+      "url": "http://localhost:8000/mcp",
+      "headers": {"Authorization": "Bearer <API_TOKEN>"}
+    }
+  }
+}
+```
+
 ## How the forecast works
 
 ### High level
