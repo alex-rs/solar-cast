@@ -90,6 +90,16 @@ class SolarCastApi:
             json={"items": items, "origin": origin},
         )
 
+    async def set_telemetry(self, system_id: str, item: dict) -> dict:
+        return await self.telemetry(system_id, [item], origin="manual")
+
+    async def delete_telemetry(self, system_id: str, start: str, end: str) -> dict:
+        return await self._request(
+            "DELETE",
+            f"/api/v1/systems/{system_id}/telemetry",
+            params={"start": start, "end": end},
+        )
+
     async def retrain(self, system_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/api/v1/systems/{system_id}/retrain")
 

@@ -44,3 +44,9 @@ def test_diagnostic_sensors():
     assert SENSORS["active_layers"]["value"](data) == 3
     attrs = SENSORS["active_layers"]["attributes"](data)
     assert attrs["layers"] == ["calibration", "nowcast", "shading"]
+
+
+def test_telemetry_age_sensor():
+    data = make_data()
+    assert SENSORS["telemetry_age_minutes"]["value"](data) == pytest.approx(10.0)
+    assert SENSORS["telemetry_age_minutes"]["diagnostic"] is True

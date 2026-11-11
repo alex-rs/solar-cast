@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -26,18 +25,19 @@ from .const import (
     CONF_TOKEN,
     CONF_URL,
     DOMAIN,
+    PLATFORMS,
     SERVICE_BACKFILL,
     SERVICE_CLEAR_HORIZON,
+    SERVICE_DELETE_TELEMETRY,
     SERVICE_GET_FORECAST,
     SERVICE_RETRAIN,
+    SERVICE_SET_TELEMETRY,
     SERVICE_UPLOAD_HORIZON,
 )
 from .coordinator import SolarCastCoordinator
 from .telemetry import TelemetryPusher
 
 LOG = logging.getLogger(__name__)
-
-PLATFORMS = [Platform.SENSOR]
 
 CONFIG_ENTRY_ID = "config_entry_id"
 
@@ -141,6 +141,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_RETRAIN,
             SERVICE_UPLOAD_HORIZON,
             SERVICE_CLEAR_HORIZON,
+            SERVICE_SET_TELEMETRY,
+            SERVICE_DELETE_TELEMETRY,
         ):
             if hass.services.has_service(DOMAIN, service):
                 hass.services.async_remove(DOMAIN, service)
@@ -205,6 +207,30 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise ValueError("unknown config entry")
         await runtime.api.delete_horizon(runtime.coordinator.system_id)
 
+    async def handle_set_telemetry(call: ServiceCall) -> None:
+        runtime = _get_runtime(hass, call.data[CONFIG_ENTRY_ID])
+        if runtime is None:
+            raise ValueError("unknown config entry")
+        await runtime.api.set_telemetry(
+            runtime.coordinator.system_id,
+            {
+                "period_start": call.data["period_start"].isoformat(),
+                "period_min": int(call.data.get("period_min", 15)),
+                "energy_wh": float(call.data["energy_wh"]),
+                "curtailed": bool(call.data.get("curtailed", False)),
+            },
+        )
+
+    async def handle_delete_telemetry(call: ServiceCall) -> None:
+        runtime = _get_runtime(hass, call.data[CONFIG_ENTRY_ID])
+        if runtime is None:
+            raise ValueError("unknown config entry")
+        await runtime.api.delete_telemetry(
+            runtime.coordinator.system_id,
+            call.data["start"].isoformat(),
+            call.data["end"].isoformat(),
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_FORECAST,
@@ -256,4 +282,32 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_CLEAR_HORIZON,
         handle_clear_horizon,
         schema=vol.Schema({vol.Required(CONFIG_ENTRY_ID): cv.string}),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_TELEMETRY,
+        handle_set_telemetry,
+        schema=vol.Schema(
+            {
+                vol.Required(CONFIG_ENTRY_ID): cv.string,
+                vol.Required("period_start"): cv.datetime,
+                vol.Required("energy_wh"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0)
+                ),
+                vol.Optional("period_min", default=15): vol.In([15, 60]),
+                vol.Optional("curtailed", default=False): cv.boolean,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DELETE_TELEMETRY,
+        handle_delete_telemetry,
+        schema=vol.Schema(
+            {
+                vol.Required(CONFIG_ENTRY_ID): cv.string,
+                vol.Required("start"): cv.datetime,
+                vol.Required("end"): cv.datetime,
+            }
+        ),
     )

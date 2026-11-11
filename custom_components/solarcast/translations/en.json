@@ -129,6 +129,14 @@
     "clear_horizon": {
       "name": "Clear horizon",
       "description": "Remove the user horizon and fall back to PVGIS terrain."
+    },
+    "set_telemetry": {
+      "name": "Set telemetry",
+      "description": "Record or correct one measured PV energy period; the row outranks pushed and backfilled data."
+    },
+    "delete_telemetry": {
+      "name": "Delete telemetry",
+      "description": "Delete measured PV energy periods in a time range."
     }
   }
 }

@@ -64,3 +64,47 @@ clear_horizon:
       selector:
         config_entry:
           integration: solarcast
+set_telemetry:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: solarcast
+    period_start:
+      required: true
+      selector:
+        datetime:
+    energy_wh:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100000
+          unit_of_measurement: Wh
+    period_min:
+      default: 15
+      selector:
+        select:
+          options:
+            - "15"
+            - "60"
+    curtailed:
+      default: false
+      selector:
+        boolean:
+delete_telemetry:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: solarcast
+    start:
+      required: true
+      selector:
+        datetime:
+    end:
+      required: true
+      selector:
+        datetime:

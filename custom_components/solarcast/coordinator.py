@@ -44,6 +44,8 @@ class ForecastData:
     ac_limit_w: float
     accuracy_nmae_14d: float | None = None
     accuracy_detail: dict = field(default_factory=dict)
+    telemetry_age_minutes: float | None = None
+    learning: dict = field(default_factory=dict)
 
     @property
     def tz(self) -> ZoneInfo:
@@ -114,6 +116,8 @@ class SolarCastCoordinator(DataUpdateCoordinator[ForecastData]):
             ac_limit_w=float(hourly.get("ac_limit_w", 0.0)),
             accuracy_nmae_14d=nmae,
             accuracy_detail=accuracy,
+            telemetry_age_minutes=hourly.get("learning", {}).get("telemetry_age_minutes"),
+            learning=hourly.get("learning", {}),
         )
 
     async def _fetch_both(self):

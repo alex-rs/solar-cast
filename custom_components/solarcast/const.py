@@ -1,6 +1,6 @@
 DOMAIN = "solarcast"
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 CONF_URL = "url"
 CONF_TOKEN = "token"
@@ -36,6 +36,7 @@ DEFAULT_URL = "http://264cce28-solarcast:8000"
 DEFAULT_SOC_THRESHOLD = 98
 DEFAULT_SYSTEM_LOSS = 0.10
 UPDATE_INTERVAL_MINUTES = 15
+TELEMETRY_STALE_MINUTES = 45
 ACCURACY_INTERVAL_SECONDS = 6 * 3600
 
 SERVICE_GET_FORECAST = "get_forecast"
@@ -43,3 +44,5 @@ SERVICE_BACKFILL = "backfill"
 SERVICE_RETRAIN = "retrain"
 SERVICE_UPLOAD_HORIZON = "upload_horizon"
 SERVICE_CLEAR_HORIZON = "clear_horizon"
+SERVICE_SET_TELEMETRY = "set_telemetry"
+SERVICE_DELETE_TELEMETRY = "delete_telemetry"

@@ -65,6 +65,17 @@ def make_data() -> ForecastData:
         ac_limit_w=5000.0,
         accuracy_nmae_14d=12.5,
         accuracy_detail={},
+        telemetry_age_minutes=10.0,
+        learning={
+            "calibration_c": 0.93,
+            "calibration_days": 7,
+            "mos": False,
+            "shading": True,
+            "nowcast": True,
+            "nowcast_buckets": 3,
+            "telemetry_last_seen": now.isoformat(),
+            "telemetry_age_minutes": 10.0,
+        },
     )
 
 

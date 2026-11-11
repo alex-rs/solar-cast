@@ -190,6 +190,13 @@ SENSORS: dict[str, dict] = {
         "device_class": SensorDeviceClass.TIMESTAMP,
         "value": lambda data: _peak(data, 1),
     },
+    "telemetry_age_minutes": {
+        "name": "Telemetry age",
+        "unit": "min",
+        "state_class": SensorStateClass.MEASUREMENT,
+        "value": lambda data: data.telemetry_age_minutes,
+        "diagnostic": True,
+    },
     "forecast_accuracy_nmae_14d": {
         "name": "Forecast accuracy nMAE 14d",
         "unit": "%",
