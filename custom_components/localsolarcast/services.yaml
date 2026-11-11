@@ -1,0 +1,47 @@
+get_forecast:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: localsolarcast
+    resolution:
+      default: 60
+      selector:
+        select:
+          options:
+            - "15"
+            - "60"
+    layer:
+      default: final
+      selector:
+        select:
+          options:
+            - final
+            - hybrid
+            - physics
+            - physics_base
+backfill:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: localsolarcast
+    days:
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 60
+    entity_id:
+      selector:
+        entity:
+          domain: sensor
+retrain:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: localsolarcast

@@ -1,0 +1,109 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LocalSolarCast backend",
+        "description": "URL of the self-hosted backend and an optional API token.",
+        "data": {
+          "url": "Backend URL",
+          "token": "API token"
+        }
+      },
+      "system": {
+        "title": "System",
+        "data": {
+          "name": "Name",
+          "system_id": "System ID",
+          "lat": "Latitude",
+          "lon": "Longitude",
+          "inverter_kw": "Inverter size (kW)",
+          "system_loss": "System losses",
+          "damping_morning": "Morning damping",
+          "damping_evening": "Evening damping"
+        }
+      },
+      "plane": {
+        "title": "Plane {count}",
+        "description": "Azimuth uses the Forecast.Solar convention: 0 = South, -90 = East, 90 = West.",
+        "data": {
+          "dec": "Tilt (degrees)",
+          "az": "Azimuth (degrees)",
+          "kwp": "Plane size (kWp)",
+          "add_another": "Add another plane"
+        }
+      },
+      "telemetry": {
+        "title": "Telemetry",
+        "description": "Optional but recommended: a PV energy meter lets the backend learn calibration and shading.",
+        "data": {
+          "energy_entity": "PV energy sensor",
+          "power_entity": "PV power sensor (diagnostic)",
+          "curtailment_entity": "Curtailment binary sensor",
+          "battery_soc_entity": "Battery SOC sensor",
+          "soc_threshold": "Battery SOC curtailment threshold",
+          "export_limited": "Export-limited system",
+          "inverter_temp_entity": "Inverter temperature sensor"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the backend",
+      "invalid_auth": "Invalid API token",
+      "invalid_system_id": "System ID must be a slug"
+    },
+    "abort": {
+      "already_configured": "This backend and system are already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "System settings",
+        "data": {
+          "name": "Name",
+          "lat": "Latitude",
+          "lon": "Longitude",
+          "inverter_kw": "Inverter size (kW)",
+          "system_loss": "System losses",
+          "damping_morning": "Morning damping",
+          "damping_evening": "Evening damping",
+          "planes_count": "Number of planes"
+        }
+      },
+      "planes": {
+        "title": "Plane geometry",
+        "description": "Azimuth uses the Forecast.Solar convention: 0 = South, -90 = East, 90 = West."
+      },
+      "telemetry": {
+        "title": "Telemetry",
+        "data": {
+          "energy_entity": "PV energy sensor",
+          "power_entity": "PV power sensor (diagnostic)",
+          "curtailment_entity": "Curtailment binary sensor",
+          "battery_soc_entity": "Battery SOC sensor",
+          "soc_threshold": "Battery SOC curtailment threshold",
+          "export_limited": "Export-limited system",
+          "inverter_temp_entity": "Inverter temperature sensor"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the backend",
+      "invalid_auth": "Invalid API token"
+    }
+  },
+  "services": {
+    "get_forecast": {
+      "name": "Get forecast",
+      "description": "Return forecast periods for a configured system."
+    },
+    "backfill": {
+      "name": "Backfill telemetry",
+      "description": "Import recorded PV energy history into the backend."
+    },
+    "retrain": {
+      "name": "Retrain accuracy layers",
+      "description": "Ask the backend to retrain calibration, shading and MOS."
+    }
+  }
+}

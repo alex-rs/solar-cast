@@ -1,0 +1,188 @@
+"""LocalSolarCast Home Assistant integration."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .api import LocalSolarCastApi, LocalSolarCastError
+from .backfill import async_backfill, async_maybe_backfill
+from .const import (
+    CONF_ENERGY_ENTITY,
+    CONF_PLANES,
+    CONF_SYSTEM_ID,
+    CONF_TOKEN,
+    CONF_URL,
+    DOMAIN,
+    SERVICE_BACKFILL,
+    SERVICE_GET_FORECAST,
+    SERVICE_RETRAIN,
+)
+from .coordinator import LocalSolarCastCoordinator
+from .telemetry import TelemetryPusher
+
+LOG = logging.getLogger(__name__)
+
+PLATFORMS = [Platform.SENSOR]
+
+CONFIG_ENTRY_ID = "config_entry_id"
+
+
+@dataclass
+class RuntimeData:
+    api: LocalSolarCastApi
+    coordinator: LocalSolarCastCoordinator
+    telemetry: TelemetryPusher
+
+
+def _system_payload(entry: ConfigEntry) -> dict:
+    options = entry.options
+    return {
+        "name": options.get("name", entry.title),
+        "lat": float(options["lat"]),
+        "lon": float(options["lon"]),
+        "inverter_kw": options.get("inverter_kw") or None,
+        "system_loss": float(options.get("system_loss", 0.10)),
+        "damping_morning": float(options.get("damping_morning", 0.0)),
+        "damping_evening": float(options.get("damping_evening", 0.0)),
+        "planes": [
+            {"dec": float(p["dec"]), "az": float(p["az"]), "kwp": float(p["kwp"])}
+            for p in options.get(CONF_PLANES, [])
+        ],
+    }
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    api = LocalSolarCastApi(
+        async_get_clientsession(hass),
+        entry.data[CONF_URL],
+        entry.data.get(CONF_TOKEN),
+    )
+    system_id = entry.data[CONF_SYSTEM_ID]
+    try:
+        await api.put_system(system_id, _system_payload(entry))
+    except LocalSolarCastError as exc:
+        from homeassistant.exceptions import ConfigEntryNotReady
+
+        raise ConfigEntryNotReady(f"cannot register system: {exc}") from exc
+
+    coordinator = LocalSolarCastCoordinator(hass, entry, api, system_id)
+    await coordinator.async_config_entry_first_refresh()
+    telemetry = TelemetryPusher(hass, entry, api, coordinator)
+    entry.runtime_data = RuntimeData(api=api, coordinator=coordinator, telemetry=telemetry)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await telemetry.async_start()
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    energy_entity = entry.options.get(CONF_ENERGY_ENTITY)
+    if energy_entity:
+        hass.async_create_task(
+            async_maybe_backfill(hass, api, entry, energy_entity, 60)
+        )
+
+    _async_register_services(hass)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    runtime = getattr(entry, "runtime_data", None)
+    if runtime is not None:
+        await runtime.telemetry.async_stop()
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not hass.config_entries.async_entries(DOMAIN):
+        for service in (SERVICE_GET_FORECAST, SERVICE_BACKFILL, SERVICE_RETRAIN):
+            if hass.services.has_service(DOMAIN, service):
+                hass.services.async_remove(DOMAIN, service)
+    return unloaded
+
+
+def _get_runtime(hass: HomeAssistant, entry_id: str) -> RuntimeData | None:
+    entry = hass.config_entries.async_get_entry(entry_id)
+    return getattr(entry, "runtime_data", None) if entry else None
+
+
+def _async_register_services(hass: HomeAssistant) -> None:
+    if hass.services.has_service(DOMAIN, SERVICE_GET_FORECAST):
+        return
+
+    async def handle_get_forecast(call: ServiceCall) -> dict:
+        runtime = _get_runtime(hass, call.data[CONFIG_ENTRY_ID])
+        if runtime is None:
+            raise ValueError("unknown config entry")
+        payload = await runtime.api.forecast(
+            runtime.coordinator.system_id,
+            int(call.data.get("resolution", 60)),
+            7,
+            call.data.get("layer", "final"),
+        )
+        return {
+            "system_id": payload["system_id"],
+            "timezone": payload["timezone"],
+            "layer": payload["layer"],
+            "periods": payload["periods"],
+        }
+
+    async def handle_backfill(call: ServiceCall) -> None:
+        entry = hass.config_entries.async_get_entry(call.data[CONFIG_ENTRY_ID])
+        runtime = _get_runtime(hass, call.data[CONFIG_ENTRY_ID])
+        if entry is None or runtime is None:
+            raise ValueError("unknown config entry")
+        entity_id = call.data.get("entity_id") or entry.options.get(CONF_ENERGY_ENTITY)
+        if not entity_id:
+            raise ValueError("no PV energy entity configured")
+        await async_backfill(
+            hass, runtime.api, runtime.coordinator.system_id, entity_id, call.data.get("days", 60)
+        )
+
+    async def handle_retrain(call: ServiceCall) -> None:
+        runtime = _get_runtime(hass, call.data[CONFIG_ENTRY_ID])
+        if runtime is None:
+            raise ValueError("unknown config entry")
+        await runtime.api.retrain(runtime.coordinator.system_id)
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_FORECAST,
+        handle_get_forecast,
+        schema=vol.Schema(
+            {
+                vol.Required(CONFIG_ENTRY_ID): cv.string,
+                vol.Optional("resolution", default=60): vol.In([15, 60]),
+                vol.Optional("layer", default="final"): vol.In(
+                    ["final", "hybrid", "physics", "physics_base"]
+                ),
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_BACKFILL,
+        handle_backfill,
+        schema=vol.Schema(
+            {
+                vol.Required(CONFIG_ENTRY_ID): cv.string,
+                vol.Optional("days", default=60): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=60)
+                ),
+                vol.Optional("entity_id"): cv.entity_id,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RETRAIN,
+        handle_retrain,
+        schema=vol.Schema({vol.Required(CONFIG_ENTRY_ID): cv.string}),
+    )
