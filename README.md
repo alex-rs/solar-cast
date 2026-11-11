@@ -2,6 +2,13 @@
 
 ![SolarCast cover](docs/cover-solar-cast.jpeg)
 
+[![Tests](https://github.com/alex-rs/solar-cast/actions/workflows/backend-tests.yml/badge.svg?branch=main)](https://github.com/alex-rs/solar-cast/actions/workflows/backend-tests.yml)
+[![hassfest](https://github.com/alex-rs/solar-cast/actions/workflows/hassfest.yml/badge.svg?branch=main)](https://github.com/alex-rs/solar-cast/actions/workflows/hassfest.yml)
+[![HACS validation](https://github.com/alex-rs/solar-cast/actions/workflows/hacs-validate.yml/badge.svg?branch=main)](https://github.com/alex-rs/solar-cast/actions/workflows/hacs-validate.yml)
+[![License: MIT](https://img.shields.io/github/license/alex-rs/solar-cast)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](backend/pyproject.toml)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
+
 Self-hosted PV production forecasting: a FastAPI backend that blends Open-Meteo
 ensemble weather with `pvlib` physics, plus a Home Assistant (HACS) integration
 that feeds the Energy dashboard.
