@@ -263,7 +263,9 @@ class ForecastPipeline:
                 minutes=int(telemetry["period_min"])
             )
         age_minutes = (
-            round((now - last_seen).total_seconds() / 60.0, 1) if last_seen is not None else None
+            round(max(0.0, (now - last_seen).total_seconds() / 60.0), 1)
+            if last_seen is not None
+            else None
         )
         nowcast_buckets = 0
         nowcast_active = False
@@ -272,9 +274,11 @@ class ForecastPipeline:
             cs_ref = simulate_clearsky(
                 weather.index, system, horizon, shading=lookup, calibration_c=calibration_c
             )
+            # The eligibility rule is "ended within 45 min"; a finished 60-min
+            # bucket therefore starts up to 45 + 60 = 105 min ago.
             recent = await self.db.telemetry(
                 system.system_id,
-                int(now.timestamp()) - 3600,
+                int(now.timestamp()) - 105 * 60,
                 int(now.timestamp()) + 1,
             )
             ref = nowcast.deltas_from_telemetry(

@@ -124,7 +124,9 @@ The response is `{"accepted": n, "rejected": [{"index": i, "reason": "..."}]}`.
 
 Deletes telemetry whose `period_start` falls in `[start, end)`. Both bounds are
 required, timezone-aware ISO 8601; `end` must be after `start` (422
-otherwise), and an unknown system is 404. Returns
+otherwise), and an unknown system is 404. Rows are keyed by whole-second
+`period_start`, so the half-open range is applied at second precision: a
+fractional `start` excludes the second it falls inside. Returns
 `{"deleted": n, "start": iso, "end": iso}`. Deleting does not retrain
 immediately: calibration, shading and MOS pick up the correction at the next
 nightly retrain (01:30 local), while the intraday nowcast ignores telemetry

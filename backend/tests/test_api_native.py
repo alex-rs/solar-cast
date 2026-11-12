@@ -196,3 +196,63 @@ async def test_forecast_learning_block(api):
     assert learning["telemetry_age_minutes"] is not None
     assert 0 <= learning["telemetry_age_minutes"] <= 60
     assert learning["nowcast_buckets"] in (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_nowcast_lookback_covers_sixty_minute_buckets(api, monkeypatch):
+    await api.put("/api/v1/systems/home", json=system_body())
+    now = dt.datetime.now(dt.timezone.utc)
+    start = now.replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=1)
+    posted = await api.post(
+        "/api/v1/systems/home/telemetry",
+        json={
+            "items": [
+                {
+                    "period_start": start.isoformat(),
+                    "period_min": 60,
+                    "energy_wh": 2400.0,
+                }
+            ]
+        },
+    )
+    assert posted.status_code == 200, posted.text
+
+    db = api.app.state.db
+    seen: dict = {}
+    real = db.telemetry
+
+    async def spy(system_id, start_ts=None, end_ts=None):
+        seen["span"] = end_ts - start_ts
+        seen["rows"] = await real(system_id, start_ts, end_ts)
+        return seen["rows"]
+
+    monkeypatch.setattr(db, "telemetry", spy)
+    response = await api.get("/api/v1/systems/home/forecast", params={"days": 1})
+    assert response.status_code == 200, response.text
+    # A 60-min bucket ended within 45 min starts up to 105 min ago; the lookback
+    # must cover that, otherwise 60-min telemetry can never feed the nowcast.
+    assert seen["span"] >= (45 + 60) * 60
+    assert seen["rows"] is not None
+
+
+@pytest.mark.asyncio
+async def test_telemetry_age_never_negative(api):
+    await api.put("/api/v1/systems/home", json=system_body())
+    now = dt.datetime.now(dt.timezone.utc)
+    start = now.replace(minute=0, second=0, microsecond=0)
+    # A 60-minute bucket starting this hour has not ended yet.
+    posted = await api.post(
+        "/api/v1/systems/home/telemetry",
+        json={
+            "items": [
+                {
+                    "period_start": start.isoformat(),
+                    "period_min": 60,
+                    "energy_wh": 100.0,
+                }
+            ]
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    learning = (await api.get("/api/v1/systems/home/forecast", params={"days": 1})).json()["learning"]
+    assert learning["telemetry_age_minutes"] == 0.0

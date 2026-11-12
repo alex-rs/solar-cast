@@ -110,3 +110,46 @@ async def test_telemetry_correction_services(hass):
         blocking=True,
     )
     assert api.deleted == [("home", start.isoformat(), end.isoformat())]
+
+
+async def test_service_inputs_are_localized_and_coerced(hass):
+    api = FakeApi()
+    entry = make_entry()
+    entry.add_to_hass(hass)
+    entry.runtime_data = SimpleNamespace(
+        api=api, coordinator=SimpleNamespace(system_id="home"), telemetry=None
+    )
+    _async_register_services(hass)
+
+    # Offset-less strings (UI/automation form) and the select selector's string
+    # values must reach the backend as an aware timestamp and an int.
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_TELEMETRY,
+        {
+            "config_entry_id": entry.entry_id,
+            "period_start": "2026-11-10 10:00:00",
+            "energy_wh": 10,
+            "period_min": "15",
+        },
+        blocking=True,
+    )
+    item = api.manual[-1][1]
+    parsed = dt.datetime.fromisoformat(item["period_start"])
+    assert parsed.utcoffset() is not None
+    assert parsed.replace(tzinfo=None) == dt.datetime(2026, 11, 10, 10, 0)
+    assert item["period_min"] == 15
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_DELETE_TELEMETRY,
+        {
+            "config_entry_id": entry.entry_id,
+            "start": "2026-11-09 00:00:00",
+            "end": "2026-11-10 00:00:00",
+        },
+        blocking=True,
+    )
+    _, start_iso, end_iso = api.deleted[-1]
+    assert dt.datetime.fromisoformat(start_iso).utcoffset() is not None
+    assert dt.datetime.fromisoformat(end_iso).utcoffset() is not None

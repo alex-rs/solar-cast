@@ -111,3 +111,20 @@ async def test_delete_validation(api):
             json={"items": [_item(start)], "origin": "sensor"},
         )
     ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_delete_respects_sub_second_start(api):
+    await api.put("/api/v1/systems/home", json=system_body())
+    start = _period_start(120)
+    await _seed(api, start, "push")
+    # The documented range starts after 00:00:30, so the :00:00 row survives.
+    response = await api.delete(
+        "/api/v1/systems/home/telemetry",
+        params={
+            "start": (start + dt.timedelta(seconds=30)).isoformat(),
+            "end": (start + dt.timedelta(minutes=15)).isoformat(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["deleted"] == 0

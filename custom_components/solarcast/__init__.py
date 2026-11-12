@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import SolarCastApi, SolarCastError
@@ -40,6 +41,13 @@ from .telemetry import TelemetryPusher
 LOG = logging.getLogger(__name__)
 
 CONFIG_ENTRY_ID = "config_entry_id"
+
+
+def _iso_datetime(value) -> str:
+    """Serialize a service datetime; naive values are HA-local wall clock."""
+    if value.tzinfo is None:
+        value = dt_util.as_local(value)
+    return value.isoformat()
 
 
 @dataclass
@@ -214,7 +222,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await runtime.api.set_telemetry(
             runtime.coordinator.system_id,
             {
-                "period_start": call.data["period_start"].isoformat(),
+                "period_start": _iso_datetime(call.data["period_start"]),
                 "period_min": int(call.data.get("period_min", 15)),
                 "energy_wh": float(call.data["energy_wh"]),
                 "curtailed": bool(call.data.get("curtailed", False)),
@@ -227,8 +235,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise ValueError("unknown config entry")
         await runtime.api.delete_telemetry(
             runtime.coordinator.system_id,
-            call.data["start"].isoformat(),
-            call.data["end"].isoformat(),
+            _iso_datetime(call.data["start"]),
+            _iso_datetime(call.data["end"]),
         )
 
     hass.services.async_register(
@@ -238,7 +246,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema(
             {
                 vol.Required(CONFIG_ENTRY_ID): cv.string,
-                vol.Optional("resolution", default=60): vol.In([15, 60]),
+                vol.Optional("resolution", default=60): vol.All(
+                    vol.Coerce(int), vol.In([15, 60])
+                ),
                 vol.Optional("layer", default="final"): vol.In(
                     ["final", "hybrid", "physics", "physics_base"]
                 ),
@@ -294,7 +304,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 vol.Required("energy_wh"): vol.All(
                     vol.Coerce(float), vol.Range(min=0)
                 ),
-                vol.Optional("period_min", default=15): vol.In([15, 60]),
+                vol.Optional("period_min", default=15): vol.All(
+                    vol.Coerce(int), vol.In([15, 60])
+                ),
                 vol.Optional("curtailed", default=False): cv.boolean,
             }
         ),

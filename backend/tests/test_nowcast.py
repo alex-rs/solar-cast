@@ -165,3 +165,19 @@ def test_never_exceeds_paco():
     delta_k = 290.0 / 300.0 - 4900.0 / 300.0
     result, _ = nowcast.apply(hybrid, cs, index[0].to_pydatetime(), delta_k, 5000.0)
     assert result.max() <= 5000.0
+
+
+def test_sixty_minute_bucket_is_eligible():
+    now = dt.datetime(2026, 6, 21, 12, 30, tzinfo=dt.timezone.utc)
+    index = pd.date_range("2026-06-21 10:30", periods=17, freq="15min", tz="UTC")
+    hybrid = pd.Series(500.0, index=index)
+    cs = pd.Series(600.0, index=index)
+    zenith = pd.Series(40.0, index=index)
+    # 11:00-12:00 bucket, still inside the 45-minute eligibility window.
+    rows = [_row(pd.Timestamp("2026-06-21 11:00", tz="UTC"), 480.0, period_min=60)]
+    anchor, delta_k, buckets = nowcast.deltas_from_telemetry(
+        rows, now, cs, hybrid, zenith, floor_w=100.0
+    )
+    assert buckets == 1
+    assert anchor == pd.Timestamp("2026-06-21 11:00", tz="UTC").to_pydatetime()
+    assert delta_k == pytest.approx(480.0 / 600.0 - 500.0 / 600.0)

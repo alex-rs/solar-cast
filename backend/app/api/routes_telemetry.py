@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -94,8 +95,12 @@ async def delete_telemetry(
         raise HTTPException(status_code=422, detail="end must be after start")
     if await db.get_system(system_id) is None:
         raise HTTPException(status_code=404, detail="system not found")
+    # Rows are keyed by whole-second period_start, so the half-open range is
+    # applied at second precision: ceil(start) .. floor(end).
     deleted = await db.delete_telemetry(
-        system_id, int(start_utc.timestamp()), int(end_utc.timestamp())
+        system_id,
+        math.ceil(start_utc.timestamp()),
+        math.floor(end_utc.timestamp()),
     )
     pipeline.invalidate()
     LOG.info("deleted %s telemetry rows for %s in [%s, %s)", deleted, system_id, start_utc, end_utc)
