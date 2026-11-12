@@ -7,7 +7,11 @@ routes are public when `COMPAT_PUBLIC=true`.
 ## Systems
 
 `PUT /api/v1/systems/{system_id}` creates or replaces a system (1-4 planes,
-up to 8 inverters). Changes to plane geometry, plane kWp, inverter topology or
+up to 8 inverters). A plane is identified by its tilt, azimuth, kWp and inverter,
+so two identical planes are accepted only when they belong to different
+inverters; identical geometry on the same inverter (or on a system without
+inverters) is rejected with 422 `duplicate plane` — merge them into one plane
+or split them across inverters. Changes to plane geometry, plane kWp, inverter topology or
 inverter AC rating reset the learned calibration, shading and MOS layers.
 
 ```json

@@ -104,7 +104,11 @@ async def fetch_system_shadow(
             LOG.warning("%s: Forecast.Solar skipped: %s", system_row["system_id"], exc)
             break
         pid = plane.get("plane_id") or plane_id_for(
-            system_row["system_id"], plane["dec"], plane["az_fs"], plane["kwp"]
+            system_row["system_id"],
+            plane["dec"],
+            plane["az_fs"],
+            plane["kwp"],
+            plane.get("inverter_id"),
         )
         await db.insert_forecast_solar_raw(
             system_row["system_id"], pid, fetched_at, response.status_code, response.text

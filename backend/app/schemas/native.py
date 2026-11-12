@@ -34,7 +34,17 @@ class SystemIn(BaseModel):
 
     @field_validator("planes")
     @classmethod
-    def _unique_ordinals(cls, planes: list[PlaneIn]) -> list[PlaneIn]:
+    def _distinct_planes(cls, planes: list[PlaneIn]) -> list[PlaneIn]:
+        seen: set[tuple[str, str, str, str]] = set()
+        for plane in planes:
+            # Mirrors plane_id_for, which is what the database keys planes by.
+            key = (f"{plane.dec:.1f}", f"{plane.az:.1f}", f"{plane.kwp:.3f}", plane.inverter or "")
+            if key in seen:
+                raise ValueError(
+                    "duplicate plane: identical tilt, azimuth and kWp on the same "
+                    "inverter; merge them or give each plane its own inverter"
+                )
+            seen.add(key)
         return planes
 
     @model_validator(mode="after")

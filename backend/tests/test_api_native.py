@@ -256,3 +256,76 @@ async def test_telemetry_age_never_negative(api):
     assert posted.status_code == 200, posted.text
     learning = (await api.get("/api/v1/systems/home/forecast", params={"days": 1})).json()["learning"]
     assert learning["telemetry_age_minutes"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_identical_planes_on_different_inverters(api):
+    body = system_body(
+        inverter_kw=None,
+        inverters=[{"id": "deye_a", "ac_kw": 1.6}, {"id": "deye_b", "ac_kw": 1.6}],
+        planes=[
+            {"dec": 17, "az": 62, "kwp": 0.87, "inverter": "deye_a"},
+            {"dec": 17, "az": 62, "kwp": 0.87, "inverter": "deye_b"},
+        ],
+    )
+    response = await api.put("/api/v1/systems/home", json=body)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    plane_ids = [plane["plane_id"] for plane in payload["planes"]]
+    assert len(plane_ids) == len(set(plane_ids)) == 2
+    assert [plane["inverter"] for plane in payload["planes"]] == ["deye_a", "deye_b"]
+
+    forecast = await api.get("/api/v1/systems/home/forecast", params={"days": 1})
+    assert forecast.status_code == 200, forecast.text
+    assert forecast.json()["kwp_total"] == pytest.approx(1.74)
+    assert forecast.json()["ac_limit_w"] == pytest.approx(3200.0)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_planes_same_inverter_rejected(api):
+    body = system_body(
+        inverter_kw=None,
+        inverters=[{"id": "deye_a", "ac_kw": 1.6}],
+        planes=[
+            {"dec": 17, "az": 62, "kwp": 0.87, "inverter": "deye_a"},
+            {"dec": 17, "az": 62, "kwp": 0.87, "inverter": "deye_a"},
+        ],
+    )
+    response = await api.put("/api/v1/systems/home", json=body)
+    assert response.status_code == 422, response.text
+    assert "duplicate plane" in response.text
+    assert (await api.get("/api/v1/systems/home")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_duplicate_planes_without_inverters_rejected(api):
+    body = system_body(
+        planes=[
+            {"dec": 17, "az": 62, "kwp": 0.87},
+            {"dec": 17, "az": 62, "kwp": 0.87},
+        ]
+    )
+    response = await api.put("/api/v1/systems/home", json=body)
+    assert response.status_code == 422, response.text
+    assert "duplicate plane" in response.text
+
+
+@pytest.mark.asyncio
+async def test_database_rejects_duplicate_plane_ids(api):
+    await api.put("/api/v1/systems/home", json=system_body())
+    db = api.app.state.db
+    system = {
+        "system_id": "static",
+        "name": "Static",
+        "lat": 44.8125,
+        "lon": 20.4612,
+        "timezone": "UTC",
+        "system_loss": 0.1,
+    }
+    planes = [
+        {"dec": 17, "az_fs": 62, "kwp": 0.87},
+        {"dec": 17, "az_fs": 62, "kwp": 0.87},
+    ]
+    with pytest.raises(ValueError, match="duplicate planes"):
+        await db.upsert_system(system, planes)
+    assert await db.get_system("static") is None

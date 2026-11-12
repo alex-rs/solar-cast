@@ -69,7 +69,11 @@ async def _load_static_systems(db: Database, pipeline: ForecastPipeline, path) -
                 for plane in entry.get("planes", [])
             ]
             if planes:
-                await db.upsert_system(system, planes, inverter_rows)
+                try:
+                    await db.upsert_system(system, planes, inverter_rows)
+                except Exception as exc:
+                    LOG.error("cannot load static system %s: %s", system_id, exc)
+                    continue
                 LOG.info("loaded static system %s", system_id)
             continue
         planes = [
@@ -77,7 +81,11 @@ async def _load_static_systems(db: Database, pipeline: ForecastPipeline, path) -
             for plane in entry.get("planes", [])
         ]
         if planes:
-            await db.upsert_system(system, planes)
+            try:
+                await db.upsert_system(system, planes)
+            except Exception as exc:
+                LOG.error("cannot load static system %s: %s", system_id, exc)
+                continue
             LOG.info("loaded static system %s", system_id)
 
 

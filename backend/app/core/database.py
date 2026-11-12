@@ -189,8 +189,18 @@ WEATHER_COLUMNS = [
 ]
 
 
-def plane_id_for(system_id: str, dec: float, az: float, kwp: float) -> str:
+def plane_id_for(
+    system_id: str, dec: float, az: float, kwp: float, inverter_id: str | None = None
+) -> str:
+    """Stable id for a plane.
+
+    Identical geometry on different inverters is a legitimate layout, so the
+    inverter disambiguates. Geometry is rounded to the precision shown in the
+    id; the API rejects two planes that would still collide.
+    """
     key = f"{system_id}|{dec:.1f}|{az:.1f}|{kwp:.3f}"
+    if inverter_id:
+        key = f"{key}|{inverter_id}"
     return hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
@@ -347,6 +357,22 @@ class Database:
                     now,
                 ),
             )
+            plane_ids = [
+                plane.get("plane_id")
+                or plane_id_for(
+                    system["system_id"],
+                    plane["dec"],
+                    plane["az_fs"],
+                    plane["kwp"],
+                    plane.get("inverter_id"),
+                )
+                for plane in planes
+            ]
+            if len(plane_ids) != len(set(plane_ids)):
+                raise ValueError(
+                    f"system {system['system_id']}: duplicate planes (same tilt, azimuth, "
+                    "kWp and inverter); merge them or split them across inverters"
+                )
             conn.execute("DELETE FROM planes WHERE system_id=?", (system["system_id"],))
             conn.execute("DELETE FROM inverters WHERE system_id=?", (system["system_id"],))
             for ordinal, inverter in enumerate(inverters, start=1):
@@ -365,7 +391,13 @@ class Database:
                     "(plane_id,system_id,ordinal,dec,az_fs,kwp,inverter_id) VALUES (?,?,?,?,?,?,?)",
                     (
                         plane.get("plane_id")
-                        or plane_id_for(system["system_id"], plane["dec"], plane["az_fs"], plane["kwp"]),
+                        or plane_id_for(
+                            system["system_id"],
+                            plane["dec"],
+                            plane["az_fs"],
+                            plane["kwp"],
+                            plane.get("inverter_id"),
+                        ),
                         system["system_id"],
                         ordinal,
                         plane["dec"],
