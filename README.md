@@ -21,8 +21,7 @@ LightGBM model trained nightly from stored telemetry predicts 15-360 minutes ahe
 and the payload reports `provenance` (`remote`, `remote_stale`, `local_model`,
 `clearsky_climatology`), `degraded`, `reason` and a per-period `confidence`. Enable
 or disable it globally (`ENABLE_LOCAL_FORECAST`) or per system (`local_fallback`).
-See `docs/API.md` ("Local fallback") and the design in
-`docs/PLAN-local-forecast-fallback.md`.
+See `docs/API.md` ("Local fallback").
 
 ## Quick start
 
