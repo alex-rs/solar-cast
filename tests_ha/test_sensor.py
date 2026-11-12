@@ -6,6 +6,7 @@ from custom_components.solarcast.coordinator import ForecastData, ForecastPeriod
 from custom_components.solarcast.sensor import (
     SENSORS,
     _mean_power_window,
+    _periods_for_day,
     _peak,
     _power_now,
     energy_current_hour,
@@ -26,6 +27,22 @@ def test_energy_sensors_from_fixture():
     assert 0 < remaining <= 2.4
     assert energy_current_hour(data) == pytest.approx(0.1)
     assert energy_next_hour(data) == pytest.approx(0.1)
+
+
+def test_energy_today_uses_the_backend_whole_day_total():
+    data = make_data()
+    data.today_wh = 3100.0
+    # The periods the backend returns only cover the rest of the day; the
+    # backend's today_wh covers the whole local day.
+    returned = sum(p.wh for p in _periods_for_day(data.hourly, data, 0)) / 1000.0
+    assert returned == pytest.approx(2.4)
+    assert energy_today(data) == pytest.approx(3.1)
+
+
+def test_energy_today_falls_back_to_period_sums_for_old_backends():
+    data = make_data()
+    data.today_wh = None
+    assert energy_today(data) == pytest.approx(2.4)
 
 
 def test_power_sensors():

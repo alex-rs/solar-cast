@@ -66,6 +66,7 @@ def make_data() -> ForecastData:
         accuracy_nmae_14d=12.5,
         accuracy_detail={},
         telemetry_age_minutes=10.0,
+        today_wh=2400.0,
         learning={
             "calibration_c": 0.93,
             "calibration_days": 7,
