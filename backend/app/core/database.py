@@ -13,7 +13,7 @@ from typing import Any, Iterable, Sequence
 
 LOG = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Telemetry write precedence: a user correction outranks the pusher, which
 # outranks a recorder backfill. Unknown origins rank as a push.
@@ -254,6 +254,13 @@ class Database:
                     "UPDATE planes SET inverter_id='main' WHERE inverter_id IS NULL "
                     "AND system_id IN (SELECT system_id FROM inverters WHERE inverter_id='main')"
                 )
+            if version < 3:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(systems)")}
+                if "local_fallback" not in columns:
+                    conn.execute(
+                        "ALTER TABLE systems ADD COLUMN local_fallback "
+                        "INTEGER NOT NULL DEFAULT 1"
+                    )
             if version < SCHEMA_VERSION:
                 conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             conn.commit()
@@ -331,15 +338,18 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO systems (system_id,name,lat,lon,elevation_m,timezone,inverter_kw,
-                    system_loss,gamma_pdc,damping_morning,damping_evening,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    system_loss,gamma_pdc,damping_morning,damping_evening,local_fallback,
+                    created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(system_id) DO UPDATE SET
                     name=excluded.name, lat=excluded.lat, lon=excluded.lon,
                     elevation_m=COALESCE(excluded.elevation_m, systems.elevation_m),
                     timezone=excluded.timezone, inverter_kw=excluded.inverter_kw,
                     system_loss=excluded.system_loss, gamma_pdc=excluded.gamma_pdc,
                     damping_morning=excluded.damping_morning,
-                    damping_evening=excluded.damping_evening, updated_at=excluded.updated_at
+                    damping_evening=excluded.damping_evening,
+                    local_fallback=excluded.local_fallback,
+                    updated_at=excluded.updated_at
                 """,
                 (
                     system["system_id"],
@@ -353,6 +363,7 @@ class Database:
                     system.get("gamma_pdc", -0.004),
                     system.get("damping_morning", 0.0),
                     system.get("damping_evening", 0.0),
+                    1 if system.get("local_fallback", True) else 0,
                     now,
                     now,
                 ),
@@ -917,12 +928,21 @@ class Database:
     async def replace_shading(self, system_id: str, rows: list[dict[str, Any]]) -> None:
         await asyncio.to_thread(self._replace_shading_sync, system_id, rows)
 
-    async def active_model(self, system_id: str) -> dict[str, Any] | None:
-        rows = await self.query(
-            "SELECT * FROM model_registry WHERE system_id=? AND active=1 "
-            "ORDER BY trained_at DESC LIMIT 1",
-            (system_id,),
-        )
+    async def active_model(
+        self, system_id: str, model_type: str | None = None
+    ) -> dict[str, Any] | None:
+        if model_type is None:
+            rows = await self.query(
+                "SELECT * FROM model_registry WHERE system_id=? AND active=1 "
+                "ORDER BY trained_at DESC LIMIT 1",
+                (system_id,),
+            )
+        else:
+            rows = await self.query(
+                "SELECT * FROM model_registry WHERE system_id=? AND model_type=? "
+                "AND active=1 ORDER BY trained_at DESC LIMIT 1",
+                (system_id, model_type),
+            )
         return rows[0] if rows else None
 
     async def register_model(self, record: dict[str, Any]) -> int:

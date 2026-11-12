@@ -6,7 +6,7 @@ from app.core.database import Database
 
 
 @pytest.mark.asyncio
-async def test_v1_database_migrates_to_v2_idempotently(tmp_path):
+async def test_v1_database_migrates_to_current_version_idempotently(tmp_path):
     path = tmp_path / "v1.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -57,7 +57,7 @@ async def test_v1_database_migrates_to_v2_idempotently(tmp_path):
         }
     ]
     assert stored["planes"][0]["inverter_id"] == "main"
-    assert (await db.query("PRAGMA user_version"))[0]["user_version"] == 2
+    assert (await db.query("PRAGMA user_version"))[0]["user_version"] == 3
 
     await db.initialize()
     stored = await db.get_system("home")

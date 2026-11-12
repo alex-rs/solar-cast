@@ -59,6 +59,7 @@ async def put_system(
         "gamma_pdc": payload.gamma_pdc,
         "damping_morning": payload.damping_morning,
         "damping_evening": payload.damping_evening,
+        "local_fallback": payload.local_fallback,
     }
     if payload.inverters:
         inverter_rows = [

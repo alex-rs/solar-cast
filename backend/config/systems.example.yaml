@@ -8,6 +8,8 @@ systems:
     inverter_kw: 5.0
     system_loss: 0.10
     gamma_pdc: -0.004
+    # Keep forecasting from telemetry when the weather API is unreachable.
+    local_fallback: true
     planes:
       - dec: 30
         az: 0

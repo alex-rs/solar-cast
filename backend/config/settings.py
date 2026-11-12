@@ -30,6 +30,10 @@ class Settings(BaseSettings):
         default_factory=lambda: [0.50, 0.35, 0.15]
     )
     enable_fs_shadow_benchmark: bool = True
+    enable_local_forecast: bool = True
+    local_forecast_hours: int = 6
+    local_train_days: int = 180
+    local_min_days: int = 14
     enable_mcp: bool = False
     systems_file: Path = BASE_DIR / "config" / "systems.yaml"
     log_level: str = "INFO"

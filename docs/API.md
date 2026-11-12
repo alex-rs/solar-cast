@@ -24,6 +24,7 @@ inverter AC rating reset the learned calibration, shading and MOS layers.
   "gamma_pdc": -0.004,
   "damping_morning": 0.0,
   "damping_evening": 0.0,
+  "local_fallback": true,
   "inverters": [
     {"id": "east", "ac_kw": 2.0},
     {"id": "west", "ac_kw": 2.0}
@@ -40,6 +41,10 @@ Use either `inverters` or the legacy single `inverter_kw`, never both. When
 is present, planes are unclipped (system kWp is the AC cap). Output includes
 `inverters` and each plane's `inverter`.
 `az` uses Forecast.Solar conventions: 0 = South, -90 = East, 90 = West.
+`local_fallback` (default `true`) allows the system to be forecast from local
+telemetry when remote weather data is unavailable; see
+[Local fallback](#local-fallback) under the native forecast.
+
 `GET /api/v1/systems`, `GET /api/v1/systems/{id}`, `DELETE /api/v1/systems/{id}`,
 and `POST /api/v1/systems/{id}/retrain` are also available.
 
@@ -83,6 +88,53 @@ periods by local calendar date.
 uncalibrated). `nowcast_buckets` counts the telemetry buckets that fed the
 intraday correction (0-4). `layers_active` is the same information for existing
 clients and remains supported.
+
+### Whole-day totals
+
+`periods` start at the current time, but days are reported whole: `daily` sums each
+local calendar date from midnight, and `today` carries the current day explicitly.
+
+```json
+{
+  "date": "2026-11-12",
+  "wh": 21319.0,
+  "elapsed_wh": 21190.2,
+  "remaining_wh": 128.8,
+  "measured_wh": 21190.2,
+  "simulated_wh": 9457.0,
+  "source": "measured+forecast"
+}
+```
+
+`wh = measured_wh + remaining_wh` when telemetry exists for the day, otherwise
+`wh = simulated_wh` and `source` is `forecast`. Summing the returned `periods` is
+therefore **not** the day total: it only covers the rest of the day and falls to
+zero in the evening. Consumers that want "today" (Home Assistant's production
+today sensor, dashboards) must read `today.wh` or `daily[0]`.
+
+### Local fallback
+
+When the weather provider cannot be reached, the forecast is still produced, and
+the payload says what produced it:
+
+| Field | Meaning |
+|---|---|
+| `provenance` | `remote`, `remote_stale`, `local_model`, `clearsky_climatology` |
+| `degraded` | true for every provenance except `remote` |
+| `reason` | why it degraded: `remote_stale`, `no_local_model`, `no_telemetry` |
+| `local_horizon_minutes` | lead time the local model is validated for (0 = not local) |
+| `periods[].confidence` | `low` beyond the local horizon; null inside it |
+
+`local_model` is a per-system LightGBM trained nightly from stored telemetry and
+sun geometry; it needs at least 14 days of history and is only published for lead
+times where it beats a clear-sky x climatology baseline (the 60-minute horizon is
+required, up to 6 hours). Beyond that horizon the curve continues with the
+climatological clear-sky shape and `confidence: "low"`, so consumers can plan but
+should not treat it as a forecast.
+
+With `local_fallback: false` on the system, or `ENABLE_LOCAL_FORECAST=false`
+globally, the previous behaviour is restored (the request fails when no weather
+data is available).
 
 ## MCP (optional)
 

@@ -5,6 +5,7 @@ import datetime as dt
 from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import get_db, get_pipeline, require_auth
+from app.core.accuracy import local_model, mos
 from app.core.database import Database
 from app.core.pipeline import ForecastPipeline
 from app.core.timeconv import ts_to_dt
@@ -38,7 +39,8 @@ async def health(
     for system in await db.list_systems():
         calibration = await db.get_calibration(system["system_id"])
         shading_rows = await db.get_shading(system["system_id"])
-        model = await db.active_model(system["system_id"])
+        model = await db.active_model(system["system_id"], mos.MODEL_TYPE)
+        local = await db.active_model(system["system_id"], local_model.MODEL_TYPE)
         last = await db.last_telemetry(system["system_id"])
         weather_ts = await db.latest_weather_fetched_at(system["lat"], system["lon"])
         systems.append(
@@ -50,7 +52,17 @@ async def health(
                     "calibration": bool(calibration),
                     "shading": bool(shading_rows),
                     "mos": bool(model),
+                    "local": bool(local),
                 },
+                "local_model": (
+                    {
+                        "trained_at": ts_to_dt(local["trained_at"]).isoformat(),
+                        "holdout_nmae_baseline": local["holdout_nmae_physics"],
+                        "holdout_nmae_local": local["holdout_nmae_hybrid"],
+                    }
+                    if local
+                    else None
+                ),
                 "active_model": (
                     {
                         "trained_at": ts_to_dt(model["trained_at"]).isoformat(),

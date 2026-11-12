@@ -42,6 +42,15 @@ def _energy_kwh(periods: list[ForecastPeriod]) -> float:
 
 
 def energy_today(data: ForecastData) -> float:
+    """Whole-day total for today (elapsed hours included), like Forecast.Solar.
+
+    The backend only returns periods from "now" onwards, so summing those would
+    make the sensor fall towards zero through the afternoon. ``today_wh`` is the
+    backend's full-day figure (measured energy so far plus the remaining forecast);
+    the period sum stays as a fallback for older backends.
+    """
+    if data.today_wh is not None:
+        return round(data.today_wh / 1000.0, 4)
     return _energy_kwh(_periods_for_day(data.hourly, data, 0))
 
 
@@ -277,6 +286,10 @@ class SolarCastSensor(CoordinatorEntity[SolarCastCoordinator], SensorEntity):
             "system_id": self.coordinator.system_id,
             "layer": data.layer,
             "generated_at": data.generated_at.isoformat(),
+            "provenance": data.provenance,
+            "degraded": data.degraded,
+            "reason": data.reason,
+            "local_horizon_minutes": data.local_horizon_minutes,
         }
         if spec_attrs := self._spec.get("attributes"):
             attrs.update(spec_attrs(data))

@@ -38,6 +38,10 @@ async def async_get_config_entry_diagnostics(
                 "hourly_periods": len(data.hourly),
                 "intraday_periods": len(data.intraday),
                 "accuracy_nmae_14d": data.accuracy_nmae_14d,
+                "provenance": data.provenance,
+                "degraded": data.degraded,
+                "reason": data.reason,
+                "local_horizon_minutes": data.local_horizon_minutes,
             }
             if data is not None
             else None

@@ -29,6 +29,11 @@ dev = [
     "pytest-asyncio>=0.23",
     "respx>=0.21",
 ]
+# Research harness only: reads parquet (SOLETE/PVDAQ) and xlsx (Cucuta) sources.
+research = [
+    "pyarrow>=15",
+    "openpyxl>=3.1",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -30,6 +30,7 @@ class SystemIn(BaseModel):
     gamma_pdc: float = -0.004
     damping_morning: float = Field(default=0.0, ge=0, le=1)
     damping_evening: float = Field(default=0.0, ge=0, le=1)
+    local_fallback: bool = True
     planes: list[PlaneIn] = Field(min_length=1, max_length=4)
 
     @field_validator("planes")
@@ -89,6 +90,7 @@ class SystemOut(BaseModel):
     gamma_pdc: float
     damping_morning: float
     damping_evening: float
+    local_fallback: bool = True
     planes: list[PlaneOut]
 
 
@@ -97,6 +99,17 @@ class PeriodOut(BaseModel):
     end: str
     wh: float
     mean_watts: float
+    confidence: str | None = None
+
+
+class TodayOut(BaseModel):
+    date: str
+    wh: float
+    elapsed_wh: float
+    remaining_wh: float
+    measured_wh: float | None = None
+    simulated_wh: float | None = None
+    source: str = "forecast"
 
 
 class DailyOut(BaseModel):
@@ -124,6 +137,9 @@ class LearningOut(BaseModel):
     nowcast_buckets: int
     telemetry_last_seen: str | None
     telemetry_age_minutes: float | None
+    local: bool = False
+    local_skill: float | None = None
+    local_trained_at: int | None = None
 
 
 class ForecastOut(BaseModel):
@@ -137,6 +153,11 @@ class ForecastOut(BaseModel):
     ac_limit_w: float
     layers_active: dict[str, bool]
     learning: LearningOut
+    provenance: str = "remote"
+    degraded: bool = False
+    reason: str | None = None
+    local_horizon_minutes: int = 0
+    today: TodayOut | None = None
     periods: list[PeriodOut]
     daily: list[DailyOut]
 

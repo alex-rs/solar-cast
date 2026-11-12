@@ -32,6 +32,7 @@ from .const import (
     CONF_INVERTERS,
     CONF_KWP,
     CONF_LAT,
+    CONF_LOCAL_FALLBACK,
     CONF_LON,
     CONF_NAME,
     CONF_PLANES,
@@ -78,6 +79,9 @@ def _system_schema(defaults: dict[str, Any], *, with_planes_count: bool = False)
         vol.Optional(
             CONF_DAMPING_EVENING, default=defaults.get(CONF_DAMPING_EVENING, 0.0)
         ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+        vol.Optional(
+            CONF_LOCAL_FALLBACK, default=defaults.get(CONF_LOCAL_FALLBACK, True)
+        ): bool,
     }
     if with_planes_count:
         fields[
@@ -162,6 +166,7 @@ def _system_payload(options: dict[str, Any], data: dict[str, Any]) -> dict[str, 
         "system_loss": float(options.get(CONF_SYSTEM_LOSS, DEFAULT_SYSTEM_LOSS)),
         "damping_morning": float(options.get(CONF_DAMPING_MORNING, 0.0)),
         "damping_evening": float(options.get(CONF_DAMPING_EVENING, 0.0)),
+        "local_fallback": bool(options.get(CONF_LOCAL_FALLBACK, True)),
         "planes": [
             {
                 "dec": float(p[CONF_DEC]),

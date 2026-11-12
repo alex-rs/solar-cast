@@ -140,7 +140,7 @@ def apply_hybrid(
 
 
 async def load_model(db: Database, system_id: str) -> MosModel | None:
-    record = await db.active_model(system_id)
+    record = await db.active_model(system_id, MODEL_TYPE)
     if not record:
         return None
     path = Path(record["artifact_path"])
@@ -312,8 +312,9 @@ def train(
 
 def db_query_active_sync(db: Database, system_id: str) -> dict | None:
     rows = db._query(
-        "SELECT * FROM model_registry WHERE system_id=? AND active=1 ORDER BY trained_at DESC LIMIT 1",
-        (system_id,),
+        "SELECT * FROM model_registry WHERE system_id=? AND model_type=? "
+        "AND active=1 ORDER BY trained_at DESC LIMIT 1",
+        (system_id, MODEL_TYPE),
     )
     return dict(rows[0]) if rows else None
 

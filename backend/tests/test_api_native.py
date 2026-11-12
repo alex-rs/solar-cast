@@ -61,8 +61,22 @@ async def test_native_forecast_shape_and_periods(api):
         index=pd.DatetimeIndex([p["start"] for p in payload["periods"]]),
     )
     by_date = local.groupby(local.index.date).sum()
+    today_local = dt.datetime.now(ZoneInfo("Europe/Belgrade")).date()
+    first_date = pd.Timestamp(payload["periods"][0]["start"]).date()
     for entry in payload["daily"]:
-        assert entry["wh"] == pytest.approx(by_date[pd.Timestamp(entry["date"]).date()])
+        day = pd.Timestamp(entry["date"]).date()
+        # Daily totals are whole local days; the returned periods start at "now"
+        # and stop at the requested horizon, so they never exceed the day total.
+        assert entry["wh"] >= by_date.get(day, 0.0) - 1e-6
+        if day == today_local:
+            assert entry["wh"] == pytest.approx(payload["today"]["wh"])
+        elif day == first_date:
+            assert entry["wh"] == pytest.approx(by_date[day])
+
+    today = payload["today"]
+    assert today["date"] == today_local.isoformat()
+    assert today["elapsed_wh"] + today["remaining_wh"] == pytest.approx(today["wh"])
+    assert today["remaining_wh"] <= today["wh"] + 1e-6
 
 
 @pytest.mark.asyncio

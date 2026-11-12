@@ -41,7 +41,7 @@ async def test_benchmark_intersection_and_metrics(api):
     start = dt.datetime(2026, 6, 21, 10, 0, tzinfo=dt.timezone.utc)
     fetched = int(start.timestamp()) - 20 * 3600
     telemetry = []
-    runs = {"physics_base": [], "hybrid": [], "forecast_solar": []}
+    runs = {"physics_base": [], "hybrid": [], "forecast_solar": [], "local": []}
     for hour in range(6):
         hour_start = start + dt.timedelta(hours=hour)
         for quarter in range(4):
@@ -60,6 +60,7 @@ async def test_benchmark_intersection_and_metrics(api):
                 ("physics_base", 35.0),
                 ("hybrid", 100.0),
                 ("forecast_solar", 75.0),
+                ("local", 90.0),
             ):
                 runs[source].append(
                     {
@@ -84,6 +85,8 @@ async def test_benchmark_intersection_and_metrics(api):
     assert bucket["sources"]["hybrid"]["nMAE_pct"] == pytest.approx(0.0)
     assert bucket["sources"]["physics_base"]["nMAE_pct"] == pytest.approx(65.0)
     assert bucket["sources"]["forecast_solar"]["nMAE_pct"] == pytest.approx(25.0)
+    # The local shadow layer is scored like any other source.
+    assert bucket["sources"]["local"]["nMAE_pct"] == pytest.approx(10.0)
     assert bucket["sources"]["hybrid"]["skill_vs_physics_base"] == pytest.approx(1.0)
     assert bucket["sources"]["physics_base"]["MBE_wh"] == pytest.approx(-260.0)
     assert result["buckets"]["d2_3"]["n_samples"] == 0

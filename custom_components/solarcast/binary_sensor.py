@@ -61,4 +61,7 @@ class SolarCastTelemetryFresh(CoordinatorEntity[SolarCastCoordinator], BinarySen
             "nowcast": learning.get("nowcast"),
             "nowcast_buckets": learning.get("nowcast_buckets"),
             "calibration_c": learning.get("calibration_c"),
+            "provenance": data.provenance,
+            "degraded": data.degraded,
+            "local_horizon_minutes": data.local_horizon_minutes,
         }

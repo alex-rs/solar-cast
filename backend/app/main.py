@@ -46,6 +46,7 @@ async def _load_static_systems(db: Database, pipeline: ForecastPipeline, path) -
             "gamma_pdc": entry.get("gamma_pdc", -0.004),
             "damping_morning": entry.get("damping_morning", 0.0),
             "damping_evening": entry.get("damping_evening", 0.0),
+            "local_fallback": bool(entry.get("local_fallback", True)),
         }
         raw_inverters = entry.get("inverters")
         if raw_inverters is not None:

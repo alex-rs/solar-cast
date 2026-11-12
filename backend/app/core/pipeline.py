@@ -14,7 +14,7 @@ import pvlib
 
 from config.settings import Settings
 
-from .accuracy import calibration, mos, nowcast, shading
+from .accuracy import calibration, local_model, mos, nowcast, shading
 from .clearsky import clearsky_ghi, simulate_clearsky
 from .database import Database
 from .openmeteo_client import OpenMeteoClient
@@ -25,7 +25,7 @@ from .physics_engine import (
     SystemConfig,
     simulate_system,
 )
-from .pvgis_client import Horizon, fetch_horizon
+from .pvgis_client import Horizon, fetch_horizon, flat_fallback
 from .timeconv import (
     UTC,
     aggregate_periods,
@@ -54,6 +54,10 @@ class LayerResult:
     nowcast_active: bool
     nowcast_buckets: int = 0
     learning: dict[str, object] = field(default_factory=dict)
+    provenance: str = "remote"
+    degraded: bool = False
+    reason: str | None = None
+    local_horizon_min: int = 0
 
 
 def system_config(row: dict) -> SystemConfig:
@@ -233,7 +237,12 @@ class ForecastPipeline:
     # -- layers ---------------------------------------------------------
     async def compute_layers(self, system_row: dict, regenerate: bool = False) -> LayerResult:
         system = system_config(system_row)
-        weather, fetched_at = await self.ensure_weather(system.lat, system.lon)
+        try:
+            weather, fetched_at = await self.ensure_weather(system.lat, system.lon)
+        except Exception as exc:
+            return await self.local_layers(system_row, system, exc)
+        weather_age = int(time.time()) - int(fetched_at)
+        provenance = "remote" if weather_age <= WEATHER_TTL_S else "remote_stale"
         horizon = await self.ensure_horizon_for_system(system_row)
 
         base = simulate_system(weather, system, horizon, calibration_c=1.0)
@@ -314,6 +323,9 @@ class ForecastPipeline:
             },
             nowcast_active=nowcast_active,
             nowcast_buckets=nowcast_buckets,
+            provenance=provenance,
+            degraded=provenance != "remote",
+            reason=None if provenance == "remote" else "remote_stale",
             learning={
                 "calibration_c": round(calibration_c, 4),
                 "calibration_days": int(c_row["clear_days"]) if c_row else 0,
@@ -324,6 +336,125 @@ class ForecastPipeline:
                 "telemetry_last_seen": last_seen.isoformat() if last_seen else None,
                 "telemetry_age_minutes": age_minutes,
             },
+        )
+
+    # -- offline / local layers ----------------------------------------
+    async def offline_horizon(self, system_row: dict) -> Horizon:
+        """Horizon for a weather-free run; a flat horizon if none is cached."""
+        try:
+            return await self.ensure_horizon_for_system(system_row)
+        except Exception as exc:  # noqa: BLE001 - any failure means "no horizon"
+            LOG.warning("horizon unavailable offline, assuming flat: %s", exc)
+            return flat_fallback()
+
+    async def telemetry_power(self, system_id: str, now: dt.datetime) -> pd.Series:
+        rows = await self.db.telemetry(
+            system_id, int(now.timestamp()) - 6 * 3600, int(now.timestamp()) + 1
+        )
+        return local_model.telemetry_series(rows)
+
+    async def local_layers(
+        self, system_row: dict, system: SystemConfig, exc: Exception | None = None
+    ) -> LayerResult:
+        """Build a weather-free forecast from telemetry, or raise when disabled."""
+        if not self.settings.enable_local_forecast or not system_row.get("local_fallback", 1):
+            raise exc if exc is not None else RuntimeError("local fallback disabled")
+
+        now = dt.datetime.now(UTC)
+        horizon = await self.offline_horizon(system_row)
+        grid = pd.date_range(
+            # Six hours of history for the anchor features and the cold-start ratio.
+            pd.Timestamp(now).floor("15min") - pd.Timedelta(hours=7),
+            now + dt.timedelta(days=7),
+            freq="15min",
+        )
+        clear = simulate_clearsky(grid, system, horizon)
+        history = await self.telemetry_power(system.system_id, now)
+        window = history[history.index >= grid[0]] if not history.empty else history
+
+        model = await local_model.load(self.db, system.system_id)
+        local_horizon = int(self.settings.local_forecast_hours) * 60
+        pac: pd.Series | None = None
+        provenance = "clearsky_climatology"
+        reason = "no_local_model"
+        used_local = False
+        cutoff: pd.Timestamp | None = now
+
+        if model is not None and not window.empty:
+            anchor = window.index.max()
+            features = local_model.anchor_features(
+                window, clear, model, anchor, now=pd.Timestamp(now)
+            )
+            if features is not None:
+                head = local_model.predict_power(
+                    model,
+                    clear,
+                    features,
+                    anchor,
+                    float(window.loc[anchor]),
+                    clear.paco,
+                )
+                head = head[head.index <= anchor + pd.Timedelta(minutes=local_horizon)]
+                pac = local_model.with_tail(model, clear, head)
+                provenance = "local_model"
+                reason = None
+                used_local = True
+                local_horizon = model.horizon_min
+                cutoff = anchor + pd.Timedelta(minutes=local_horizon)
+            elif model is not None:
+                reason = "no_recent_telemetry"
+
+        if pac is None:
+            ratio = 1.0
+            if history.empty:
+                reason = "no_telemetry"
+            elif not window.empty:
+                clear_window = clear.pac.reindex(window.index).clip(lower=0.0)
+                usable = (
+                    (window / clear_window.where(clear_window > 1e-6))
+                    .replace([np.inf, -np.inf], np.nan)
+                    .dropna()
+                )
+                if not usable.empty:
+                    ratio = float(np.clip(usable.median(), *local_model.CLIM_CLIP))
+            pac = local_model.climatology_power(clear, ratio)
+
+        final = _with_pac(clear, pac)
+        last_seen = window.index.max().to_pydatetime() if not window.empty else None
+        age = round(max(0.0, (now - last_seen).total_seconds() / 60.0), 1) if last_seen else None
+        return LayerResult(
+            base=clear,
+            physics=clear,
+            hybrid=clear,
+            final=final,
+            calibration_c=1.0,
+            active={
+                "calibration": False,
+                "shading": False,
+                "mos": False,
+                "nowcast": False,
+            },
+            nowcast_active=False,
+            nowcast_buckets=0,
+            learning={
+                "calibration_c": 1.0,
+                "calibration_days": 0,
+                "mos": False,
+                "shading": False,
+                "nowcast": False,
+                "nowcast_buckets": 0,
+                "telemetry_last_seen": last_seen.isoformat() if last_seen else None,
+                "telemetry_age_minutes": age,
+                "local": used_local,
+                "local_skill": (
+                    model.holdout_skill.get("skill") if used_local and model else None
+                ),
+                "local_trained_at": model.trained_at if used_local and model else None,
+            },
+            provenance=provenance,
+            degraded=True,
+            reason=reason,
+            local_horizon_min=local_horizon if used_local else 0,
         )
 
     def _layer(self, layers: LayerResult, name: str) -> SimResult:
@@ -350,7 +481,24 @@ class ForecastPipeline:
         system = system_config(system_row)
         sim = self._layer(layers, layer)
         now = dt.datetime.now(UTC)
-        periods, daily = self._periods_payload(sim, resolution, days, now, system.timezone)
+        confidence_cutoff = None
+        if layers.degraded:
+            confidence_cutoff = (
+                pd.Timestamp(now) + pd.Timedelta(minutes=layers.local_horizon_min)
+                if layers.local_horizon_min
+                else pd.Timestamp(now)
+            )
+        periods, daily = self._periods_payload(
+            sim, resolution, days, now, system.timezone, confidence_cutoff
+        )
+        today = self._today_block(
+            sim,
+            now,
+            system.timezone,
+            await self._measured_today(system.system_id, now, system.timezone),
+        )
+        daily = [entry for entry in daily if entry["date"] != today["date"]]
+        daily.insert(0, {"date": today["date"], "wh": today["wh"]})
         weather_ts = await self.db.latest_weather_fetched_at(system.lat, system.lon)
         payload = {
             "system_id": system_id,
@@ -363,23 +511,80 @@ class ForecastPipeline:
             "ac_limit_w": sim.paco,
             "layers_active": layers.active,
             "learning": layers.learning,
+            "provenance": layers.provenance,
+            "degraded": layers.degraded,
+            "reason": layers.reason,
+            "local_horizon_minutes": layers.local_horizon_min,
             "periods": periods,
             "daily": daily,
+            "today": today,
         }
         self._cache[key] = (now_mono + CACHE_TTL_S, payload)
         return payload
 
+    async def _measured_today(
+        self, system_id: str, now: dt.datetime, timezone: str
+    ) -> float | None:
+        """Energy actually reported since local midnight, or ``None`` without telemetry."""
+        tz = ZoneInfo(timezone)
+        start = dt.datetime.combine(now.astimezone(tz).date(), dt.time(0), tzinfo=tz)
+        rows = await self.db.telemetry(
+            system_id, int(start.timestamp()), int(now.timestamp()) + 1
+        )
+        if not rows:
+            return None
+        return float(sum(float(row["energy_wh"]) for row in rows))
+
+    def _today_block(
+        self, sim: SimResult, now: dt.datetime, timezone: str, measured_wh: float | None
+    ) -> dict:
+        """Whole-day total for the current local date."""
+        tz = ZoneInfo(timezone)
+        day = now.astimezone(tz).date()
+        start = pd.Timestamp(dt.datetime.combine(day, dt.time(0), tzinfo=tz))
+        end = start + pd.Timedelta(days=1)
+        energy = instant_energy(sim.pac).tz_convert(timezone)
+        day_energy = energy[(energy.index >= start) & (energy.index < end)]
+        simulated = float(day_energy.sum()) if len(day_energy) else 0.0
+        now_ts = pd.Timestamp(now)
+        elapsed_sim = (
+            float(day_energy[day_energy.index <= now_ts].sum()) if len(day_energy) else 0.0
+        )
+        remaining = max(0.0, simulated - elapsed_sim)
+        if measured_wh is None:
+            return {
+                "date": day.isoformat(),
+                "wh": round(simulated, 3),
+                "elapsed_wh": round(elapsed_sim, 3),
+                "remaining_wh": round(remaining, 3),
+                "measured_wh": None,
+                "simulated_wh": round(simulated, 3),
+                "source": "forecast",
+            }
+        return {
+            "date": day.isoformat(),
+            "wh": round(measured_wh + remaining, 3),
+            "elapsed_wh": round(measured_wh, 3),
+            "remaining_wh": round(remaining, 3),
+            "measured_wh": round(measured_wh, 3),
+            "simulated_wh": round(simulated, 3),
+            "source": "measured+forecast",
+        }
+
     def _periods_payload(
-        self, sim: SimResult, resolution: int, days: int, now: dt.datetime, timezone: str
+        self,
+        sim: SimResult,
+        resolution: int,
+        days: int,
+        now: dt.datetime,
+        timezone: str,
+        confidence_cutoff: pd.Timestamp | None = None,
     ) -> tuple[list[dict], list[dict]]:
         energy = instant_energy(sim.pac)
-        if resolution == 60:
-            series = aggregate_periods(energy, 15, 60)
-        else:
-            series = energy
+        full = aggregate_periods(energy, 15, 60) if resolution == 60 else energy
         start_floor = pd.Timestamp(now).floor(f"{resolution}min")
         end = pd.Timestamp(now + dt.timedelta(days=days))
-        series = series[(series.index >= start_floor) & (series.index < end)]
+        series = full[(full.index >= start_floor) & (full.index < end)]
         mean = series / (resolution / 60.0)
         elevation = sim.elevation.resample(f"{resolution}min", label="left", closed="left").max()
         sun = elevation.reindex(series.index).fillna(-90.0) > 0
@@ -407,19 +612,25 @@ class ForecastPipeline:
                 continue
             local_start = stamp.tz_convert(timezone)
             local_end = (stamp + pd.Timedelta(minutes=resolution)).tz_convert(timezone)
+            low = confidence_cutoff is not None and stamp > confidence_cutoff
             periods.append(
                 {
                     "start": local_start.isoformat(),
                     "end": local_end.isoformat(),
                     "wh": float(wh),
                     "mean_watts": float(mean.loc[stamp]),
+                    "confidence": "low" if low else None,
                 }
             )
-        daily_series = local_daily_energy(series, timezone)
+        # Daily totals cover whole local days: the current day keeps the hours that
+        # have already elapsed, so "today" does not shrink towards zero in the evening.
+        daily_series = local_daily_energy(full[full.index < end], timezone)
+        today_local = pd.Timestamp(now).tz_convert(timezone).date()
+        last_local = pd.Timestamp(end).tz_convert(timezone).date()
         daily = [
-            {"date": day, "wh": float(value)}
+            {"date": day.isoformat(), "wh": float(value)}
             for day, value in daily_series.items()
-            if np.isfinite(value)
+            if np.isfinite(value) and today_local <= day <= last_local
         ]
         return periods, daily
 
@@ -428,8 +639,16 @@ class ForecastPipeline:
         written = 0
         for system_row in await self.db.list_systems():
             system = system_config(system_row)
-            weather, fetched_at = await self.ensure_weather(system.lat, system.lon)
+            try:
+                weather, fetched_at = await self.ensure_weather(system.lat, system.lon)
+            except Exception as exc:  # noqa: BLE001 - an offline site must not stop the sweep
+                LOG.warning("snapshot skipped for %s: %s", system.system_id, exc)
+                continue
             layers = await self.compute_layers(system_row)
+            if layers.degraded:
+                # Benchmark rows must be the remote stack; the local layer is
+                # snapshotted separately with source="local".
+                continue
             now = dt.datetime.now(UTC)
             rows = []
             for name, sim in (
@@ -451,6 +670,45 @@ class ForecastPipeline:
                             "mean_watts": float(wh / 0.25),
                         }
                     )
+            await self.db.insert_runs(rows)
+            written += len(rows)
+        return written
+
+    async def snapshot_local(self) -> int:
+        """Store the local layer while remote weather is healthy (shadow mode)."""
+        if not self.settings.enable_local_forecast:
+            return 0
+        written = 0
+        now = dt.datetime.now(UTC)
+        for system_row in await self.db.list_systems():
+            if not system_row.get("local_fallback", 1):
+                continue
+            system = system_config(system_row)
+            if await local_model.load(self.db, system.system_id) is None:
+                continue
+            try:
+                layers = await self.local_layers(system_row, system)
+            except Exception as exc:  # noqa: BLE001 - shadow work must never break a run
+                LOG.warning("%s: local shadow failed: %s", system.system_id, exc)
+                continue
+            energy = instant_energy(layers.final.pac)
+            rows = []
+            for stamp, wh in energy.items():
+                lead = (stamp.timestamp() - now.timestamp()) / 3600.0
+                if lead > self.settings.local_forecast_hours or lead < 0:
+                    continue
+                rows.append(
+                    {
+                        "system_id": system.system_id,
+                        "fetched_at": int(now.timestamp()),
+                        "period_start": int(stamp.timestamp()),
+                        "period_min": 15,
+                        "lead_hours": lead,
+                        "source": "local",
+                        "energy_wh": float(wh),
+                        "mean_watts": float(wh / 0.25),
+                    }
+                )
             await self.db.insert_runs(rows)
             written += len(rows)
         return written

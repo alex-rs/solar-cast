@@ -14,6 +14,16 @@ Self-hosted PV production forecasting: a FastAPI backend that blends Open-Meteo
 ensemble weather with `pvlib` physics, plus a Home Assistant (HACS) integration
 that feeds the Energy dashboard.
 
+### Local fallback
+
+If the weather provider is unreachable, the forecaster still answers: a per-system
+LightGBM model trained nightly from stored telemetry predicts 15-360 minutes ahead,
+and the payload reports `provenance` (`remote`, `remote_stale`, `local_model`,
+`clearsky_climatology`), `degraded`, `reason` and a per-period `confidence`. Enable
+or disable it globally (`ENABLE_LOCAL_FORECAST`) or per system (`local_fallback`).
+See `docs/API.md` ("Local fallback") and the design in
+`docs/PLAN-local-forecast-fallback.md`.
+
 ## Quick start
 
 ```sh

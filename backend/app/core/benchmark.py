@@ -20,7 +20,7 @@ BUCKETS = {
     "d2_3": (36.0, 84.0),
     "d4_7": (84.0, 168.0),
 }
-SOURCES = ["forecast_solar", "physics_base", "physics", "hybrid", "final"]
+SOURCES = ["forecast_solar", "physics_base", "physics", "hybrid", "final", "local"]
 METRIC_KEYS = [
     "nMAE_pct",
     "nRMSE_pct",

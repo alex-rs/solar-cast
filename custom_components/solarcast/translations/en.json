@@ -78,7 +78,8 @@
           "system_loss": "System losses",
           "damping_morning": "Morning damping",
           "damping_evening": "Evening damping",
-          "planes_count": "Number of planes"
+          "planes_count": "Number of planes",
+          "local_fallback": "Keep forecasting from local telemetry when weather data is unavailable"
         }
       },
       "inverters": {

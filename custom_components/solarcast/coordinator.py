@@ -46,6 +46,11 @@ class ForecastData:
     accuracy_detail: dict = field(default_factory=dict)
     telemetry_age_minutes: float | None = None
     learning: dict = field(default_factory=dict)
+    provenance: str = "remote"
+    degraded: bool = False
+    reason: str | None = None
+    local_horizon_minutes: int = 0
+    today_wh: float | None = None
 
     @property
     def tz(self) -> ZoneInfo:
@@ -118,6 +123,16 @@ class SolarCastCoordinator(DataUpdateCoordinator[ForecastData]):
             accuracy_detail=accuracy,
             telemetry_age_minutes=hourly.get("learning", {}).get("telemetry_age_minutes"),
             learning=hourly.get("learning", {}),
+            provenance=hourly.get("provenance", "remote"),
+            degraded=bool(hourly.get("degraded", False)),
+            reason=hourly.get("reason"),
+            local_horizon_minutes=int(hourly.get("local_horizon_minutes", 0)),
+            today_wh=(
+                float(hourly["today"]["wh"])
+                if isinstance(hourly.get("today"), dict)
+                and hourly["today"].get("wh") is not None
+                else None
+            ),
         )
 
     async def _fetch_both(self):

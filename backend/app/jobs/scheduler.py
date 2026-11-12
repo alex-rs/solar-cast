@@ -17,7 +17,7 @@ from config.settings import Settings
 
 from ..core import benchmark as benchmark_module
 from ..core import weights as weights_module
-from ..core.accuracy import calibration, mos, shading
+from ..core.accuracy import calibration, local_model, mos, shading
 from ..core.clearsky import simulate_clearsky
 from ..core.database import Database
 from ..core.pipeline import ForecastPipeline, system_config
@@ -108,6 +108,19 @@ async def retrain_system(db: Database, pipeline: ForecastPipeline, system_row: d
         horizon,
         pipeline.settings.models_dir,
     )
+    if pipeline.settings.enable_local_forecast:
+        try:
+            await local_model.train(
+                db,
+                system_row,
+                system,
+                horizon,
+                pipeline.settings.models_dir,
+                train_days=pipeline.settings.local_train_days,
+                min_days=pipeline.settings.local_min_days,
+            )
+        except Exception:  # noqa: BLE001 - the nightly job must finish for every system
+            LOG.exception("local model training failed for %s", system_row["system_id"])
     pipeline.invalidate()
 
 
@@ -175,6 +188,11 @@ def create_scheduler(
         pipeline.snapshot_nowcast,
         CronTrigger(minute=5, timezone=timezone),
         id="nowcast_snapshot",
+    )
+    scheduler.add_job(
+        pipeline.snapshot_local,
+        CronTrigger(minute=40, timezone=timezone),
+        id="local_shadow",
     )
     scheduler.add_job(
         nightly_retrain,
