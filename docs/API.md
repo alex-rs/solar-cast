@@ -151,7 +151,10 @@ Tools:
 - `get_forecast(system_id, days=3, resolution=60, layer="final")` returns the
   native forecast payload. `days` must be 1-7, `resolution` is 15 or 60, and
   `layer` is `final`, `hybrid`, `physics` or `physics_base`. Unknown systems and
-  out-of-range days are reported as MCP tool errors.
+  out-of-range days are reported as MCP tool errors. When the payload is
+  degraded (`degraded: true`: stale weather, local-model fallback or clear-sky
+  climatology), the response also carries a human-readable `notice` explaining
+  the data source.
 
 The server exposes no write tools: no system CRUD, telemetry or retraining.
 

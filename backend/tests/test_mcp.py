@@ -56,6 +56,30 @@ async def test_mcp_requires_bearer_token(settings, weather_stub):
         assert response.status_code == 401
 
 
+async def test_mcp_degraded_forecast_includes_notice(settings, weather_stub, monkeypatch):
+    from app.core import pipeline as pipeline_module
+
+    monkeypatch.setattr(pipeline_module, "WEATHER_TTL_S", -1)
+    async with running_app(mcp_settings(settings), weather_stub, AUTH) as client:
+        created = await client.put("/api/v1/systems/home", json=system_body())
+        assert created.status_code == 200, created.text
+
+        async with streamable_http_client(
+            "http://test/mcp", http_client=client
+        ) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                forecast = await session.call_tool(
+                    "get_forecast", {"system_id": "home", "days": 1}
+                )
+                assert forecast.is_error is False, forecast.content
+                payload = json.loads(forecast.content[0].text)
+                assert payload["degraded"] is True
+                assert payload["provenance"] == "remote_stale"
+                assert "stale" in payload["notice"]
+                assert payload["weather_fetched_at"] in payload["notice"]
+
+
 async def test_mcp_tools(settings, weather_stub):
     async with running_app(mcp_settings(settings), weather_stub, AUTH) as client:
         created = await client.put("/api/v1/systems/home", json=system_body())

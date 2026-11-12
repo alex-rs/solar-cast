@@ -39,6 +39,39 @@ class MCPAuthMiddleware:
         await self.app(scope, receive, send)
 
 
+_CLIMATOLOGY_REASONS = {
+    "no_local_model": "no local model is trained yet",
+    "no_recent_telemetry": "telemetry is too old for the local model",
+    "no_telemetry": "no telemetry has been recorded",
+}
+
+
+def _degraded_notice(payload: dict[str, Any]) -> str:
+    """Explain a degraded forecast in words for MCP clients."""
+    provenance = payload.get("provenance")
+    reason = payload.get("reason")
+    if provenance == "remote_stale":
+        return (
+            "Live weather data is stale (last fetched "
+            f"{payload.get('weather_fetched_at')}); the forecast is degraded and "
+            "has reduced confidence."
+        )
+    if provenance == "local_model":
+        horizon = payload.get("local_horizon_minutes") or 0
+        return (
+            "Live weather data is unavailable; the forecast uses the local "
+            f"telemetry model for the next {horizon} minutes and clear-sky "
+            "climatology beyond."
+        )
+    if provenance == "clearsky_climatology":
+        detail = _CLIMATOLOGY_REASONS.get(reason, "telemetry is unavailable")
+        return (
+            "Live weather data is unavailable and "
+            f"{detail}; showing clear-sky climatology, which is not a weather forecast."
+        )
+    return f"Forecast is degraded ({reason or provenance}); treat it as lower confidence."
+
+
 def build_mcp_server(app: FastAPI) -> MCPServer:
     """Build the read-only SolarCast MCP server bound to a running FastAPI app."""
     server = MCPServer(
@@ -47,7 +80,8 @@ def build_mcp_server(app: FastAPI) -> MCPServer:
         instructions=(
             "Read-only access to SolarCast PV forecasts. Call list_systems first, "
             "then get_forecast. Periods are ISO 8601 with UTC offset; wh is period "
-            "energy and daily is local-calendar-date energy."
+            "energy and daily is local-calendar-date energy. When degraded is true, "
+            "read notice: the forecast is not based on live weather."
         ),
     )
 
@@ -80,8 +114,13 @@ def build_mcp_server(app: FastAPI) -> MCPServer:
         if not 1 <= days <= 7:
             raise ToolError("days must be between 1 and 7")
         try:
-            return await app.state.pipeline.get_forecast(system_id, resolution, days, layer)
+            forecast = await app.state.pipeline.get_forecast(
+                system_id, resolution, days, layer
+            )
         except KeyError:
             raise ToolError(f"unknown system: {system_id}") from None
+        if forecast.get("degraded"):
+            forecast = {**forecast, "notice": _degraded_notice(forecast)}
+        return forecast
 
     return server
