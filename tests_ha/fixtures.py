@@ -19,7 +19,7 @@ from custom_components.solarcast.const import (
     CONF_URL,
     DOMAIN,
 )
-from custom_components.solarcast.coordinator import ForecastData, ForecastPeriod
+from custom_components.solarcast.coordinator import DailyForecast, ForecastData, ForecastPeriod
 
 TZ = ZoneInfo("Europe/Belgrade")
 
@@ -67,6 +67,13 @@ def make_data() -> ForecastData:
         accuracy_detail={},
         telemetry_age_minutes=10.0,
         today_wh=2400.0,
+        daily=[
+            DailyForecast(
+                date=midnight.date() + dt.timedelta(days=offset),
+                wh=2400.0 if offset == 0 else 1000.0 * (offset + 1),
+            )
+            for offset in range(7)
+        ],
         learning={
             "calibration_c": 0.93,
             "calibration_days": 7,

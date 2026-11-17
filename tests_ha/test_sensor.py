@@ -9,7 +9,9 @@ from custom_components.solarcast.sensor import (
     _periods_for_day,
     _peak,
     _power_now,
+    _today,
     energy_current_hour,
+    energy_for_day,
     energy_next_hour,
     energy_today,
     energy_today_remaining,
@@ -67,3 +69,19 @@ def test_telemetry_age_sensor():
     data = make_data()
     assert SENSORS["telemetry_age_minutes"]["value"](data) == pytest.approx(10.0)
     assert SENSORS["telemetry_age_minutes"]["diagnostic"] is True
+
+
+def test_day_sensors_expose_backend_whole_day_totals():
+    data = make_data()
+    for day, expected_kwh in zip(range(3, 8), (3.0, 4.0, 5.0, 6.0, 7.0)):
+        spec = SENSORS[f"energy_production_day_{day}"]
+        assert spec["value"](data) == pytest.approx(expected_kwh)
+        assert spec["attributes"](data)["date"] == _today(data, day - 1).isoformat()
+
+
+def test_day_sensors_fall_back_to_period_sums_without_daily():
+    data = make_data()
+    data.daily = []
+    # The fixture has hourly periods for exactly three local days.
+    assert energy_for_day(data, 2) == pytest.approx(2.4)
+    assert energy_for_day(data, 3) == pytest.approx(0.0)

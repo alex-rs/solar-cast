@@ -58,6 +58,19 @@ def energy_tomorrow(data: ForecastData) -> float:
     return _energy_kwh(_periods_for_day(data.hourly, data, 1))
 
 
+def energy_for_day(data: ForecastData, offset: int) -> float:
+    """Whole-day kWh for ``offset`` days from today.
+
+    Prefers the backend's ``daily`` totals (whole local days, like the today
+    sensor); sums the hourly periods when an older backend omits them.
+    """
+    target = _today(data, offset)
+    for entry in data.daily:
+        if entry.date == target:
+            return round(entry.wh / 1000.0, 4)
+    return _energy_kwh(_periods_for_day(data.hourly, data, offset))
+
+
 def energy_today_remaining(data: ForecastData) -> float:
     now = _now(data.tz)
     total = 0.0
@@ -220,6 +233,23 @@ SENSORS: dict[str, dict] = {
         "attributes": lambda data: {"layers": sorted(k for k, v in data.layers_active.items() if v)},
     },
 }
+
+
+def _day_sensor(offset: int) -> dict:
+    """Day 1 is today, so ``offset`` 2 is day 3 — the Forecast.Solar convention."""
+    return {
+        "name": f"Energy production day {offset + 1}",
+        "unit": "kWh",
+        "device_class": SensorDeviceClass.ENERGY,
+        "state_class": SensorStateClass.TOTAL,
+        "value": lambda data, offset=offset: energy_for_day(data, offset),
+        "attributes": lambda data, offset=offset: {"date": _today(data, offset).isoformat()},
+    }
+
+
+# The backend requests seven days starting today, so day 3 is the first day not
+# already covered by energy_production_today / energy_production_tomorrow.
+SENSORS.update({f"energy_production_day_{day}": _day_sensor(day - 1) for day in range(3, 8)})
 
 
 async def async_setup_entry(

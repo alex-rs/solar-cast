@@ -33,6 +33,12 @@ class ForecastPeriod:
     mean_watts: float
 
 
+@dataclass(frozen=True)
+class DailyForecast:
+    date: dt.date
+    wh: float
+
+
 @dataclass
 class ForecastData:
     hourly: list[ForecastPeriod]
@@ -51,6 +57,7 @@ class ForecastData:
     reason: str | None = None
     local_horizon_minutes: int = 0
     today_wh: float | None = None
+    daily: list[DailyForecast] = field(default_factory=list)
 
     @property
     def tz(self) -> ZoneInfo:
@@ -133,6 +140,10 @@ class SolarCastCoordinator(DataUpdateCoordinator[ForecastData]):
                 and hourly["today"].get("wh") is not None
                 else None
             ),
+            daily=[
+                DailyForecast(date=dt.date.fromisoformat(item["date"]), wh=float(item["wh"]))
+                for item in hourly.get("daily", [])
+            ],
         )
 
     async def _fetch_both(self):

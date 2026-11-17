@@ -329,6 +329,13 @@ integration and point it at the backend URL. The integration registers the
 system, polls the forecast and (optionally) pushes your PV energy meter back as
 telemetry for calibration and shading learning.
 
+The forecast surfaces as Forecast.Solar-style sensors. Alongside
+`energy_production_today` and `energy_production_tomorrow`, the integration
+creates `energy_production_day_3` through `energy_production_day_7` (whole-day
+kWh, with the calendar day in the `date` attribute; day 1 is today). Those give
+automations a plain numeric entity per forecast day, e.g. a `numeric_state`
+trigger on `energy_production_day_4` above 20 kWh.
+
 ### Correcting recorded production
 
 Pushed telemetry outranks backfill, and a user correction outranks both: rows
